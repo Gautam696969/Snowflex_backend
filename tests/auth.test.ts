@@ -190,10 +190,16 @@ describe('role-protected employee APIs', () => {
 
 describe('database failures', () => {
   it('returns a generic server error when authentication storage is unavailable', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(service.register).mockRejectedValueOnce(new Error('provider details must stay private'))
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
       .expect(500, { success: false, message: 'Internal server error', error: null })
+    expect(log).toHaveBeenCalledWith('[api] POST /api/auth/register failed', {
+      error: 'provider details must stay private',
+      cause: undefined,
+    })
+    log.mockRestore()
   })
 })

@@ -8,7 +8,7 @@ const environmentSchema = z.object({
   SNOWFLAKE_PASSWORD: z.string().min(1),
   SNOWFLAKE_WAREHOUSE: z.string().min(1),
   SNOWFLAKE_DATABASE: z.string().default('AUTH_PROJECT'),
-  SNOWFLAKE_SCHEMA: z.string().default('AUTH'),
+  SNOWFLAKE_SCHEMA: z.string().default('PUBLIC'),
   SNOWFLAKE_ROLE: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('1d'),

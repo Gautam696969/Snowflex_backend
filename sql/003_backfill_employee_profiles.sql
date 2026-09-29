@@ -1,0 +1,6 @@
+-- Create the default employee profile for users missing one.
+INSERT INTO EMPLOYEES (USER_ID, EMPLOYEE_CODE, STATUS)
+SELECT U.ID, 'EMP-' || LPAD(U.ID::VARCHAR, 6, '0'), 'ACTIVE'
+FROM USERS U
+LEFT JOIN EMPLOYEES E ON E.USER_ID = U.ID
+WHERE E.ID IS NULL;

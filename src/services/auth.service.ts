@@ -2,6 +2,10 @@ import { executeQuery } from '../config/snowflake'
 import { HttpError } from '../utils/http-error'
 import { AuthenticatedUser, createToken } from '../utils/jwt'
 import { comparePassword, hashPassword } from '../utils/password'
+import { snowflakeTable } from '../utils/snowflake-identifiers'
+
+const usersTable = snowflakeTable('USERS')
+const employeesTable = snowflakeTable('EMPLOYEES')
 
 interface UserRow {
   [column: string]: unknown
@@ -27,7 +31,7 @@ export interface AuthServiceContract {
 async function findUserByEmail(email: string): Promise<UserRow | undefined> {
   // Keep user input in binds, never in SQL text.
   const rows = await executeQuery<UserRow>(
-    'SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE FROM USERS WHERE EMAIL = ?',
+    `SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE FROM ${usersTable} WHERE EMAIL = ?`,
     [email],
   )
   return rows[0]
@@ -54,15 +58,15 @@ export const authService: AuthServiceContract = {
 
     const passwordHash = await hashPassword(password)
     await executeQuery(
-      `INSERT INTO USERS (FULL_NAME, EMAIL, PASSWORD_HASH, ROLE)
+      `INSERT INTO ${usersTable} (FULL_NAME, EMAIL, PASSWORD_HASH, ROLE)
        VALUES (?, ?, ?, 'EMPLOYEE')`,
       [fullName, email, passwordHash],
     )
     const createdUser = await findUserByEmail(email)
     if (!createdUser) throw new HttpError(500, 'Unable to create employee profile')
     await executeQuery(
-      `INSERT INTO EMPLOYEES (USER_ID, EMPLOYEE_CODE, STATUS)
-       SELECT ID, 'EMP-' || LPAD(ID::VARCHAR, 6, '0'), 'ACTIVE' FROM USERS WHERE ID = ?`,
+      `INSERT INTO ${employeesTable} (USER_ID, EMPLOYEE_CODE, STATUS)
+       SELECT ID, 'EMP-' || LPAD(ID::VARCHAR, 6, '0'), 'ACTIVE' FROM ${usersTable} WHERE ID = ?`,
       [createdUser.ID],
     )
   },
@@ -73,14 +77,14 @@ export const authService: AuthServiceContract = {
       throw new HttpError(401, 'Invalid email or password')
     }
 
-    await executeQuery('UPDATE USERS SET LAST_LOGIN = CURRENT_TIMESTAMP() WHERE ID = ?', [user.ID])
+    await executeQuery(`UPDATE ${usersTable} SET LAST_LOGIN = CURRENT_TIMESTAMP() WHERE ID = ?`, [user.ID])
     const safeUser = toSafeUser(user)
     return { token: createToken(toTokenPayload(safeUser)), user: safeUser }
   },
 
   async getUserById(id) {
     const rows = await executeQuery<UserRow>(
-      'SELECT ID, FULL_NAME, EMAIL, ROLE FROM USERS WHERE ID = ?',
+      `SELECT ID, FULL_NAME, EMAIL, ROLE FROM ${usersTable} WHERE ID = ?`,
       [id],
     )
     if (!rows[0]) {
@@ -91,7 +95,7 @@ export const authService: AuthServiceContract = {
 
   async listUsers() {
     const rows = await executeQuery<UserRow>(
-      'SELECT ID, FULL_NAME, EMAIL, ROLE FROM USERS ORDER BY ID',
+      `SELECT ID, FULL_NAME, EMAIL, ROLE FROM ${usersTable} ORDER BY ID`,
     )
     return rows.map(toSafeUser)
   },

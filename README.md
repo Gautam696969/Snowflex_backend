@@ -46,7 +46,7 @@ SNOWFLAKE_USERNAME=
 SNOWFLAKE_PASSWORD=
 SNOWFLAKE_WAREHOUSE=
 SNOWFLAKE_DATABASE=AUTH_PROJECT
-SNOWFLAKE_SCHEMA=AUTH
+SNOWFLAKE_SCHEMA=PUBLIC
 SNOWFLAKE_ROLE=
 JWT_SECRET=
 JWT_EXPIRES_IN=1d
@@ -58,14 +58,14 @@ Startup validates the configuration, prints `Connecting to Snowflake...`, waits 
 
 ## Snowflake Setup
 
-`AUTH_PROJECT.AUTH.USERS` is an existing table. Do not recreate or drop it. Run `sql/001_create_tables.sql` with a role that can create tables in `AUTH_PROJECT.AUTH`; it creates only `EMPLOYEES`, `DEPARTMENTS`, `ATTENDANCE`, `LEAVE_TYPES`, `LEAVE_REQUESTS`, and `TASKS`. Then run `sql/002_seed_data.sql` for `CASUAL`, `SICK`, and `ANNUAL` leave types.
+`AUTH_PROJECT.PUBLIC.USERS` is an existing table. Do not recreate or drop it. Run `sql/001_create_tables.sql` with a role that can create tables in `AUTH_PROJECT.PUBLIC`; it creates only the supporting `EMPLOYEES`, `DEPARTMENTS`, `ATTENDANCE`, `LEAVE_TYPES`, `LEAVE_REQUESTS`, and `TASKS` tables. Run `sql/002_seed_data.sql` for `CASUAL`, `SICK`, and `ANNUAL` leave types, then `sql/003_backfill_employee_profiles.sql` to link existing users that do not yet have employee profiles.
 
 Grant the service role warehouse/database/schema/table permissions for `USERS` and the new tables. Snowflake standard-table `UNIQUE` constraints are informational, so the service checks for duplicate users, departments, and employee identifiers; concurrent writers should be serialized or protected with a supported enforced-key table strategy.
 
 Legacy accounts with `ROLE = 'USER'` authenticate as `EMPLOYEE` without a table rewrite. To migrate stored values after reviewing the impact, run:
 
 ```sql
-UPDATE AUTH_PROJECT.AUTH.USERS
+UPDATE AUTH_PROJECT.PUBLIC.USERS
 SET ROLE = 'EMPLOYEE', UPDATED_AT = CURRENT_TIMESTAMP()
 WHERE ROLE = 'USER';
 ```
@@ -73,12 +73,12 @@ WHERE ROLE = 'USER';
 To assign an operator role, update a known account explicitly:
 
 ```sql
-UPDATE AUTH_PROJECT.AUTH.USERS
+UPDATE AUTH_PROJECT.PUBLIC.USERS
 SET ROLE = 'ADMIN', UPDATED_AT = CURRENT_TIMESTAMP()
 WHERE EMAIL = 'admin@example.com';
 ```
 
-A newly registered user gets role `EMPLOYEE` and an active linked employee profile. Employee onboarding by HR should create an employee record for an existing user instead of registering that user again.
+A newly registered user gets role `EMPLOYEE` and a linked active employee profile. Employee onboarding by HR should create an employee record for an existing user instead of registering that user again.
 
 ## Run and Verify
 
