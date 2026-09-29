@@ -1,7 +1,7 @@
-import bcrypt from 'bcryptjs'
 import { executeQuery } from '../config/snowflake'
 import { HttpError } from '../utils/http-error'
 import { AuthenticatedUser, createToken } from '../utils/jwt'
+import { comparePassword, hashPassword } from '../utils/password'
 
 interface UserRow {
   [column: string]: unknown
@@ -38,7 +38,7 @@ function toSafeUser(user: UserRow): AuthenticatedUser {
     id: Number(user.ID),
     fullName: user.FULL_NAME,
     email: user.EMAIL,
-    role: user.ROLE,
+    role: user.ROLE === 'USER' ? 'EMPLOYEE' : user.ROLE,
   }
 }
 
@@ -52,17 +52,24 @@ export const authService: AuthServiceContract = {
       throw new HttpError(409, 'Email already registered')
     }
 
-    const passwordHash = await bcrypt.hash(password, 12)
+    const passwordHash = await hashPassword(password)
     await executeQuery(
       `INSERT INTO USERS (FULL_NAME, EMAIL, PASSWORD_HASH, ROLE)
-       VALUES (?, ?, ?, 'USER')`,
+       VALUES (?, ?, ?, 'EMPLOYEE')`,
       [fullName, email, passwordHash],
+    )
+    const createdUser = await findUserByEmail(email)
+    if (!createdUser) throw new HttpError(500, 'Unable to create employee profile')
+    await executeQuery(
+      `INSERT INTO EMPLOYEES (USER_ID, EMPLOYEE_CODE, STATUS)
+       SELECT ID, 'EMP-' || LPAD(ID::VARCHAR, 6, '0'), 'ACTIVE' FROM USERS WHERE ID = ?`,
+      [createdUser.ID],
     )
   },
 
   async login(email, password) {
     const user = await findUserByEmail(email)
-    if (!user || !(await bcrypt.compare(password, user.PASSWORD_HASH))) {
+    if (!user || !(await comparePassword(password, user.PASSWORD_HASH))) {
       throw new HttpError(401, 'Invalid email or password')
     }
 

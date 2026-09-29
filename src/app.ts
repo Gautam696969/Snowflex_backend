@@ -1,13 +1,23 @@
 import 'dotenv/config'
 import cors from 'cors'
+import helmet from 'helmet'
+import morgan from 'morgan'
+import rateLimit from 'express-rate-limit'
 import express, { Express } from 'express'
 import { createAdminRouter } from './routes/admin.routes'
 import { errorHandler } from './middleware/error.middleware'
 import { createAuthRouter } from './routes/auth.routes'
 import { AuthServiceContract } from './services/auth.service'
+import { employeeRouter } from './routes/employee.routes'
+import { departmentRouter } from './routes/department.routes'
+import { attendanceRouter } from './routes/attendance.routes'
+import { leaveRouter } from './routes/leave.routes'
+import { taskRouter } from './routes/task.routes'
+import { dashboardRouter } from './routes/dashboard.routes'
+import { isSnowflakeConnected } from './config/snowflake'
 
 function allowedOrigins(): Set<string> {
-  const configured = (process.env.FRONTEND_URL ?? '')
+  const configured = (process.env.CORS_ORIGIN ?? process.env.FRONTEND_URL ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean)
@@ -25,6 +35,9 @@ export function createApp(service?: AuthServiceContract): Express {
   const app = express()
   const origins = allowedOrigins()
 
+  app.disable('x-powered-by')
+  app.use(helmet())
+  app.use(morgan('method :url :status', { skip: (_request, response) => response.statusCode >= 500 }))
   app.use(
     cors({
       origin(origin, callback) {
@@ -40,13 +53,25 @@ export function createApp(service?: AuthServiceContract): Express {
       },
     }),
   )
-  app.use(express.json({ limit: '16kb' }))
+  app.use(express.json({ limit: '32kb' }))
+  app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false }))
 
   app.get('/api/health', (_request, response) => {
-    response.status(200).json({ success: true, message: 'Backend is running' })
+    const database = isSnowflakeConnected() || service ? 'connected' : 'disconnected'
+    response.status(database === 'connected' ? 200 : 503).json({
+      success: database === 'connected',
+      message: database === 'connected' ? 'API is healthy' : 'Database unavailable',
+      database,
+    })
   })
   app.use('/api/auth', createAuthRouter(service))
   app.use('/api/admin', createAdminRouter(service))
+  app.use('/api/employees', employeeRouter)
+  app.use('/api/departments', departmentRouter)
+  app.use('/api/attendance', attendanceRouter)
+  app.use('/api/leaves', leaveRouter)
+  app.use('/api/tasks', taskRouter)
+  app.use('/api/dashboard', dashboardRouter)
   app.use((_request, response) => {
     response.status(404).json({ success: false, message: 'Not found' })
   })

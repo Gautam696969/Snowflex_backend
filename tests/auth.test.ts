@@ -46,7 +46,7 @@ describe('health check', () => {
   it('reports that the backend is running', async () => {
     await request(app)
       .get('/api/health')
-      .expect(200, { success: true, message: 'Backend is running' })
+      .expect(200, { success: true, message: 'API is healthy', database: 'connected' })
   })
 
   it('allows loopback Vite fallback ports during development', async () => {
@@ -63,8 +63,15 @@ describe('registration', () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
-      .expect(201, { success: true, message: 'User registered successfully' })
+      .expect(201, { success: true, message: 'User registered successfully', data: null })
     expect(service.register).toHaveBeenCalledWith('John Doe', 'john@example.com', 'Password123')
+  })
+
+  it('uses the standardized validation error envelope', async () => {
+    await request(app)
+      .post('/api/auth/register')
+      .send({ fullName: '', email: 'bad', password: 'short' })
+      .expect(422, { success: false, message: 'Request validation failed', error: null })
   })
 
   it('rejects duplicate email addresses', async () => {
@@ -72,18 +79,18 @@ describe('registration', () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
-      .expect(409, { success: false, message: 'Email already registered' })
+      .expect(409, { success: false, message: 'Email already registered', error: null })
   })
 
   it('rejects invalid emails and short passwords', async () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'not-an-email', password: 'Password123' })
-      .expect(400, { success: false, message: 'Invalid request' })
+      .expect(422, { success: false, message: 'Request validation failed', error: null })
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'short' })
-      .expect(400, { success: false, message: 'Invalid request' })
+      .expect(422, { success: false, message: 'Request validation failed', error: null })
     expect(service.register).not.toHaveBeenCalled()
   })
 })
@@ -94,11 +101,11 @@ describe('login and protected routes', () => {
       .post('/api/auth/login')
       .send({ email: 'john@example.com', password: 'Password123' })
       .expect(200)
-    expect(response.body).toMatchObject({ success: true, message: 'Login successful', user: safeUser })
-    expect(response.body.token).toEqual(expect.any(String))
-    expect(response.body).not.toHaveProperty('user.password')
-    expect(response.body).not.toHaveProperty('user.passwordHash')
-    const payload = jwt.decode(response.body.token) as jwt.JwtPayload
+    expect(response.body).toMatchObject({ success: true, message: 'Login successful', data: { user: safeUser } })
+    expect(response.body.data.token).toEqual(expect.any(String))
+    expect(response.body.data).not.toHaveProperty('user.password')
+    expect(response.body.data).not.toHaveProperty('user.passwordHash')
+    const payload = jwt.decode(response.body.data.token) as jwt.JwtPayload
     expect(payload).toMatchObject({ id: safeUser.id, email: safeUser.email, role: safeUser.role })
     expect(payload).not.toHaveProperty('fullName')
     expect(payload.exp! - payload.iat!).toBe(86_400)
@@ -111,15 +118,15 @@ describe('login and protected routes', () => {
     await request(app)
       .post('/api/auth/login')
       .send({ email, password })
-      .expect(401, { success: false, message: 'Invalid email or password' })
+      .expect(401, { success: false, message: 'Invalid email or password', error: null })
   })
 
   it('rejects missing and invalid JWTs', async () => {
-    await request(app).get('/api/auth/me').expect(401, { success: false, message: 'Unauthorized' })
+    await request(app).get('/api/auth/me').expect(401, { success: false, message: 'Unauthorized', error: null })
     await request(app)
       .get('/api/auth/me')
       .set('Authorization', 'Bearer invalid-token')
-      .expect(401, { success: false, message: 'Unauthorized' })
+      .expect(401, { success: false, message: 'Unauthorized', error: null })
 
     const expiredToken = jwt.sign(
       { id: safeUser.id, email: safeUser.email, role: safeUser.role },
@@ -129,7 +136,7 @@ describe('login and protected routes', () => {
     await request(app)
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${expiredToken}`)
-      .expect(401, { success: false, message: 'Unauthorized' })
+      .expect(401, { success: false, message: 'Unauthorized', error: null })
   })
 
   it('returns the authenticated user and supports stateless logout', async () => {
@@ -137,12 +144,12 @@ describe('login and protected routes', () => {
     await request(app)
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${token}`)
-      .expect(200, { success: true, user: safeUser })
+      .expect(200, { success: true, message: 'Profile fetched successfully', data: safeUser })
     expect(service.getUserById).toHaveBeenCalledWith(safeUser.id)
     await request(app)
       .post('/api/auth/logout')
       .set('Authorization', `Bearer ${token}`)
-      .expect(200, { success: true, message: 'Logout successful' })
+      .expect(200, { success: true, message: 'Logout successful', data: null })
   })
 })
 
@@ -154,7 +161,7 @@ describe('admin users route', () => {
     await request(app)
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${userToken}`)
-      .expect(403, { success: false, message: 'Forbidden' })
+      .expect(403, { success: false, message: 'Forbidden', error: null })
     expect(service.listUsers).not.toHaveBeenCalled()
   })
 
@@ -164,8 +171,20 @@ describe('admin users route', () => {
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(200)
-    expect(response.body).toEqual({ success: true, users: [safeUser] })
+    expect(response.body).toEqual({ success: true, message: 'Users fetched successfully', data: [safeUser] })
     expect(JSON.stringify(response.body)).not.toContain('PASSWORD_HASH')
+  })
+})
+
+describe('role-protected employee APIs', () => {
+  it('requires authentication and blocks employee write access', async () => {
+    await request(app).get('/api/employees').expect(401)
+    const employeeToken = createToken({ id: safeUser.id, email: safeUser.email, role: 'EMPLOYEE' })
+    await request(app)
+      .post('/api/employees')
+      .set('Authorization', `Bearer ${employeeToken}`)
+      .send({ userId: 5, employeeCode: 'E-005' })
+      .expect(403, { success: false, message: 'Forbidden', error: null })
   })
 })
 
@@ -175,6 +194,6 @@ describe('database failures', () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
-      .expect(500, { success: false, message: 'Something went wrong' })
+      .expect(500, { success: false, message: 'Internal server error', error: null })
   })
 })
