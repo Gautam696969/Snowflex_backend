@@ -13,8 +13,7 @@ export const attendanceController = {
   },
   async mine(request: Request, response: Response, next: NextFunction) {
     try {
-      const employee = await employeeService.forUser(request.user!.id)
-      sendSuccess(response, 200, 'Attendance fetched successfully', await attendanceService.listForEmployee(Number(employee.id)))
+      sendSuccess(response, 200, 'Attendance fetched successfully', await attendanceService.listForEmployee(request.user!.id))
     } catch (error) { next(error) }
   },
   async byEmployee(request: Request, response: Response, next: NextFunction) {

@@ -24,7 +24,7 @@ function getConnectionOptions(): ConnectionOptions {
     password: requiredEnvironmentValue('SNOWFLAKE_PASSWORD'),
     warehouse: requiredEnvironmentValue('SNOWFLAKE_WAREHOUSE'),
     database: requiredEnvironmentValue('SNOWFLAKE_DATABASE'),
-    schema: requiredEnvironmentValue('SNOWFLAKE_SCHEMA'),
+    schema: process.env.SNOWFLAKE_SCHEMA?.trim() || 'PUBLIC',
     role: requiredEnvironmentValue('SNOWFLAKE_ROLE'),
   }
 }
@@ -44,7 +44,7 @@ async function getConnection(): Promise<Connection> {
       candidate.connect((error, connected) => {
         if (error) {
           connectionPromise = undefined
-          reject(new Error('Snowflake connection failed'))
+          reject(new Error('Snowflake connection failed', { cause: error }))
           return
         }
         resolve(connected)
@@ -65,7 +65,7 @@ export async function executeQuery<T extends SnowflakeRow>(
       binds,
       complete(error, _statement, rows) {
         if (error) {
-          reject(new Error('Snowflake query failed'))
+          reject(new Error('Snowflake query failed', { cause: error }))
           return
         }
         resolve((rows ?? []) as T[])
