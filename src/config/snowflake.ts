@@ -5,6 +5,10 @@ type SnowflakeRow = Record<string, unknown>
 
 let connectionPromise: Promise<Connection> | undefined
 
+export function isSnowflakeConnected(): boolean {
+  return connectionPromise !== undefined
+}
+
 function requiredEnvironmentValue(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) {
@@ -68,6 +72,18 @@ export async function executeQuery<T extends SnowflakeRow>(
       },
     })
   })
+}
+
+export async function executeInsert(sqlText: string, binds: Binds = []): Promise<void> {
+  await executeQuery(sqlText, binds)
+}
+
+export async function executeUpdate(sqlText: string, binds: Binds = []): Promise<void> {
+  await executeQuery(sqlText, binds)
+}
+
+export async function executeDelete(sqlText: string, binds: Binds = []): Promise<void> {
+  await executeQuery(sqlText, binds)
 }
 
 export async function testSnowflakeConnection(): Promise<void> {

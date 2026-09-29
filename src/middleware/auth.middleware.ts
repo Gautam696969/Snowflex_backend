@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express'
 import { AuthTokenPayload, verifyToken } from '../utils/jwt'
 import { HttpError } from '../utils/http-error'
+import { sendError } from '../utils/apiResponse'
 
 declare global {
   namespace Express {
@@ -14,7 +15,7 @@ export function requireAuth(request: Request, response: Response, next: NextFunc
   const authorization = request.header('Authorization')
   const match = authorization?.match(/^Bearer\s+(.+)$/i)
   if (!match) {
-    response.status(401).json({ success: false, message: 'Unauthorized' })
+    sendError(response, 401, 'Unauthorized')
     return
   }
 
@@ -22,7 +23,7 @@ export function requireAuth(request: Request, response: Response, next: NextFunc
     request.user = verifyToken(match[1])
     next()
   } catch {
-    response.status(401).json({ success: false, message: 'Unauthorized' })
+    sendError(response, 401, 'Unauthorized')
   }
 }
 
