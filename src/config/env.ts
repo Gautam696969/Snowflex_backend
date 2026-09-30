@@ -14,6 +14,9 @@ const environmentSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('1d'),
   CORS_ORIGIN: z.string().default(process.env.FRONTEND_URL || 'http://localhost:5173'),
   ATTENDANCE_START_TIME: z.string().regex(/^\d{2}:\d{2}$/).default('09:00'),
+  AI_API_KEY: z.string().min(1).optional(),
+  AI_BASE_URL: z.string().trim().url().optional().or(z.literal('')),
+  AI_MODEL: z.string().default('gpt-4o-mini'),
 })
 
 export type Environment = z.infer<typeof environmentSchema>
