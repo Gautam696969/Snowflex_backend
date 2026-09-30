@@ -6,6 +6,7 @@ import { logger } from '../utils/logger'
 export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
   if (error instanceof HttpError) {
     sendError(response, error.statusCode, error.message)
+    logger.warn(`${request.method} ${request.path} -> ${error.statusCode}: ${error.message}`)
     return
   }
 
