@@ -1,6 +1,7 @@
 import { ErrorRequestHandler } from 'express'
 import { HttpError } from '../utils/http-error'
 import { sendError } from '../utils/apiResponse'
+import { logger } from '../utils/logger'
 
 export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
   if (error instanceof HttpError) {
@@ -8,7 +9,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
     return
   }
 
-  console.error(`[api] ${request.method} ${request.path} failed`, {
+  logger.error(`${request.method} ${request.path} failed`, {
     error: error instanceof Error ? error.message : String(error),
     cause: error instanceof Error && error.cause instanceof Error ? error.cause.message : undefined,
   })

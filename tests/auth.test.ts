@@ -4,6 +4,7 @@ import request from 'supertest'
 import { createApp } from '../src/app'
 import { AuthServiceContract } from '../src/services/auth.service'
 import { HttpError } from '../src/utils/http-error'
+import { logger } from '../src/utils/logger'
 import { AuthenticatedUser, createToken } from '../src/utils/jwt'
 
 process.env.JWT_SECRET = 'test-only-secret-with-sufficient-entropy'
@@ -190,13 +191,13 @@ describe('role-protected employee APIs', () => {
 
 describe('database failures', () => {
   it('returns a generic server error when authentication storage is unavailable', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const log = vi.spyOn(logger, 'error').mockImplementation(() => {})
     vi.mocked(service.register).mockRejectedValueOnce(new Error('provider details must stay private'))
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
       .expect(500, { success: false, message: 'Internal server error', error: null })
-    expect(log).toHaveBeenCalledWith('[api] POST /api/auth/register failed', {
+    expect(log).toHaveBeenCalledWith('POST /api/auth/register failed', {
       error: 'provider details must stay private',
       cause: undefined,
     })

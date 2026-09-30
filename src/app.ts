@@ -1,9 +1,9 @@
 import 'dotenv/config'
 import cors from 'cors'
 import helmet from 'helmet'
-import morgan from 'morgan'
+import { requestLogger } from './middleware/request-logger.middleware'
 import rateLimit from 'express-rate-limit'
-import express, { Express } from 'express'
+import express, { Express, RequestHandler } from 'express'
 import { createAdminRouter } from './routes/admin.routes'
 import { errorHandler } from './middleware/error.middleware'
 import { createAuthRouter } from './routes/auth.routes'
@@ -37,7 +37,7 @@ export function createApp(service?: AuthServiceContract): Express {
 
   app.disable('x-powered-by')
   app.use(helmet())
-  app.use(morgan('method :url :status', { skip: (_request, response) => response.statusCode >= 500 }))
+  app.use(requestLogger)
   app.use(
     cors({
       origin(origin, callback) {
