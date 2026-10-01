@@ -9,6 +9,7 @@ import { requestLogger } from './middleware/request-logger.middleware'
 import { createAuthRouter } from './routes/auth.routes'
 import { AuthServiceContract } from './services/auth.service'
 import { aiEmployeeRouter } from './routes/ai-employee.routes'
+import { voiceRouter } from './routes/voice.routes'
 import { employeeRouter } from './routes/employee.routes'
 import { departmentRouter } from './routes/department.routes'
 import { attendanceRouter } from './routes/attendance.routes'
@@ -68,6 +69,7 @@ export function createApp(service?: AuthServiceContract): Express {
   app.use('/api/auth', createAuthRouter(service))
   app.use('/api/admin', createAdminRouter(service))
   app.use('/api/ai-employee', aiEmployeeRouter)
+  app.use('/api/voice', voiceRouter)
   app.use('/api/employees', employeeRouter)
   app.use('/api/departments', departmentRouter)
   app.use('/api/attendance', attendanceRouter)
