@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { createApp } from './app'
 import { testSnowflakeConnection } from './config/snowflake'
 import { getEnvironment } from './config/env'
+import { validateGroqConfig } from './config/groq'
 import { logger } from './utils/logger'
 
 async function startServer(): Promise<void> {
@@ -19,6 +20,8 @@ async function startServer(): Promise<void> {
     process.exitCode = 1
     return
   }
+
+  validateGroqConfig()
 
   try {
     logger.info('Connecting to Snowflake...')

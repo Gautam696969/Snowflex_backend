@@ -4,6 +4,11 @@ import { sendError } from '../utils/apiResponse'
 import { logger } from '../utils/logger'
 
 export const errorHandler: ErrorRequestHandler = (error, request, response, _next) => {
+  if (error?.code === 'LIMIT_FILE_SIZE') {
+    sendError(response, 413, 'Audio file is too large. Maximum size is 10 MB.')
+    return
+  }
+
   if (error instanceof HttpError) {
     sendError(response, error.statusCode, error.message)
     logger.warn(`${request.method} ${request.path} -> ${error.statusCode}: ${error.message}`)
