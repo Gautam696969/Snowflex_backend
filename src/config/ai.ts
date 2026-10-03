@@ -105,7 +105,7 @@ export const aiClient = {
         finish_reason?: string
       }[]
       model?: string
-      usage?: { prompt_tokens?: number; completion_tokens?: number }
+      usage?: { prompt_tokens?: number; completion_tokens?: number }  
     }
 
     let reply = extractReply(body)

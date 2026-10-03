@@ -7,6 +7,10 @@ import { logger } from '../utils/logger'
 
 const conversationsTable = snowflakeTable('AI_CONVERSATIONS')
 const messagesTable = snowflakeTable('AI_MESSAGES')
+const employeesTable = snowflakeTable('EMPLOYEES')
+const leaveRequestsTable = snowflakeTable('LEAVE_REQUESTS')
+const leaveTypesTable = snowflakeTable('LEAVE_TYPES')
+const usersTable = snowflakeTable('USERS')
 
 export interface AiConversation {
   id: number
@@ -58,6 +62,52 @@ function buildSystemPrompt(userId: number, role: string): string {
     'Help with HR tasks such as summarizing leave balances, attendance trends, team rosters, and drafting leave requests or announcements.',
     'Keep responses concise, professional, and grounded in the Snowflex workspace context.',
   ].join(' ')
+}
+
+function asksWhoIsOnLeaveToday(message: string): boolean {
+  return /\b(?:who|employees?|people|staff)\b.*\b(?:on leave|taking leave|leave|away)\b.*\btoday\b/i.test(message)
+}
+
+async function getLeaveTodayReply(userId: number, role: string): Promise<string> {
+  const normalizedRole = role.toUpperCase()
+  const isEmployee = !['ADMIN', 'HR', 'MANAGER'].includes(normalizedRole)
+  const scope = normalizedRole === 'MANAGER'
+    ? `AND E.MANAGER_ID IN (SELECT ID FROM ${employeesTable} WHERE USER_ID = ?)`
+    : isEmployee
+      ? 'AND E.USER_ID = ?'
+      : ''
+  const binds = scope ? [userId] : []
+  const rows = await executeQuery<Record<string, unknown>>(
+    `SELECT U.FULL_NAME, T.NAME AS LEAVE_TYPE,
+       TO_VARCHAR(L.START_DATE, 'YYYY-MM-DD') AS START_DATE,
+       TO_VARCHAR(L.END_DATE, 'YYYY-MM-DD') AS END_DATE
+     FROM ${leaveRequestsTable} L
+     JOIN ${employeesTable} E ON E.ID = L.EMPLOYEE_ID
+     JOIN ${usersTable} U ON U.ID = E.USER_ID
+     JOIN ${leaveTypesTable} T ON T.ID = L.LEAVE_TYPE_ID
+     WHERE L.STATUS = 'APPROVED'
+       AND L.START_DATE <= CURRENT_DATE()
+       AND L.END_DATE >= CURRENT_DATE()
+       ${scope}
+     ORDER BY U.FULL_NAME`,
+    binds,
+  )
+
+  if (rows.length === 0) {
+    if (isEmployee) return 'You do not have an approved leave request covering today.'
+    if (normalizedRole === 'MANAGER') return 'No direct reports have an approved leave request covering today.'
+    return 'No employees have an approved leave request covering today.'
+  }
+
+  const heading = isEmployee
+    ? 'Your approved leave covering today:'
+    : normalizedRole === 'MANAGER'
+      ? 'Approved leave today among your direct reports:'
+      : 'Approved leave today across the organization:'
+  const entries = rows.map((row) =>
+    `- ${String(row.FULL_NAME)} — ${String(row.LEAVE_TYPE)} (${String(row.START_DATE)} to ${String(row.END_DATE)})`,
+  )
+  return [heading, ...entries].join('\n')
 }
 
 export const aiEmployeeService = {
@@ -132,17 +182,25 @@ export const aiEmployeeService = {
 
     const messages: AiChatMessage[] = [{ role: 'system', content: buildSystemPrompt(userId, role) }, ...history]
 
-    let result
-    try {
-      result = await aiClient.chat(messages)
-    } catch (aiError) {
-      logger.error('AI provider call failed', { error: aiError instanceof Error ? aiError.message : String(aiError) })
-      throw new HttpError(502, 'AI provider is unavailable. Please try again later.')
+    let reply: string
+    let model: string
+    if (asksWhoIsOnLeaveToday(userMessage)) {
+      reply = await getLeaveTodayReply(userId, role)
+      model = 'SNOWFLAKE_LIVE_DATA'
+    } else {
+      try {
+        const result = await aiClient.chat(messages)
+        reply = result.reply
+        model = result.model
+      } catch (aiError) {
+        logger.error('AI provider call failed', { error: aiError instanceof Error ? aiError.message : String(aiError) })
+        throw new HttpError(502, 'AI provider is unavailable. Please try again later.')
+      }
     }
 
     await executeInsert(
       `INSERT INTO ${messagesTable} (CONVERSATION_ID, ROLE, CONTENT, MODEL) VALUES (?, 'ASSISTANT', ?, ?)`,
-      [conversationId, result.reply, result.model],
+      [conversationId, reply, model],
     )
 
     await executeUpdate(
