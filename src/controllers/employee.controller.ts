@@ -31,8 +31,8 @@ export const employeeController = {
   },
   async create(request: Request, response: Response, next: NextFunction) {
     try {
-      await employeeService.create(request.body)
-      sendSuccess(response, 201, 'Employee created successfully', null)
+      const created = await employeeService.create(request.body)
+      sendSuccess(response, 201, 'Employee created successfully', created)
     } catch (error) { next(error) }
   },
   async update(request: Request, response: Response, next: NextFunction) {
