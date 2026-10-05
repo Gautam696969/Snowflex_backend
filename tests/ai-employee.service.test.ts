@@ -94,3 +94,33 @@ describe('AI answers for who is on leave today', () => {
     expect(executeQueryMock.mock.calls.some(([sql]) => String(sql).includes('LEAVE_REQUESTS'))).toBe(false)
   })
 })
+
+describe('stateless widget chat', () => {
+  it('answers without creating or updating an AI Employee conversation', async () => {
+    const result = await aiEmployeeService.widgetChat(12, 'ADMIN', {
+      source: 'widget',
+      message: 'Summarise this',
+      history: [{ role: 'user', content: 'Earlier widget question' }],
+    })
+
+    expect(result.message).toMatchObject({ role: 'assistant', content: 'model reply', model: 'test-model' })
+    expect(aiChatMock).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ role: 'user', content: 'Earlier widget question' }),
+      expect.objectContaining({ role: 'user', content: 'Summarise this' }),
+    ]))
+    expect(executeInsertMock).not.toHaveBeenCalled()
+    expect(executeUpdateMock).not.toHaveBeenCalled()
+    expect(executeQueryMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the live leave-data response available without persistence', async () => {
+    const result = await aiEmployeeService.widgetChat(12, 'ADMIN', {
+      source: 'widget',
+      message: 'Who is on leave today?',
+    })
+
+    expect(result.message.content).toContain('Morgan Rivera — Annual leave')
+    expect(executeInsertMock).not.toHaveBeenCalled()
+    expect(executeUpdateMock).not.toHaveBeenCalled()
+  })
+})
