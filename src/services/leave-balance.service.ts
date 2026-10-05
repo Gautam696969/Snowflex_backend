@@ -91,11 +91,24 @@ export const leaveBalanceService = {
   },
 
   async getBalancesForUser(userId: number, year = new Date().getFullYear()): Promise<LeaveBalanceDto[]> {
-    const empRow = await executeQuery<DbRow>(
+    let empRow = await executeQuery<DbRow>(
       `SELECT ID FROM EMPLOYEES WHERE USER_ID = ?`,
       [userId]
     )
-    if (!empRow[0]) throw new HttpError(404, 'Employee profile not found')
+    if (!empRow[0]) {
+      // Auto-provision an employee profile for users who don't have one yet
+      const empCode = `EMP-${String(userId).padStart(6, '0')}`
+      await executeInsert(
+        `INSERT INTO EMPLOYEES (USER_ID, EMPLOYEE_CODE, STATUS, CREATED_AT, UPDATED_AT)
+         VALUES (?, ?, 'ACTIVE', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())`,
+        [userId, empCode]
+      ).catch(() => {})
+      empRow = await executeQuery<DbRow>(
+        `SELECT ID FROM EMPLOYEES WHERE USER_ID = ?`,
+        [userId]
+      )
+    }
+    if (!empRow[0]) return []
     const employeeId = Number(empRow[0].ID)
     return this.getBalancesForEmployee(employeeId, year)
   },

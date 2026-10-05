@@ -7,6 +7,9 @@ const employeesTable = snowflakeTable('EMPLOYEES')
 const usersTable = snowflakeTable('USERS')
 const departmentsTable = snowflakeTable('DEPARTMENTS')
 
+const leaveRequestsTable = snowflakeTable('LEAVE_REQUESTS')
+const leaveTypesTable = snowflakeTable('LEAVE_TYPES')
+
 const employeeColumns = ['USER_ID', 'EMPLOYEE_CODE', 'PHONE', 'DEPARTMENT_ID', 'DESIGNATION', 'JOINING_DATE', 'MANAGER_ID', 'STATUS'] as const
 type EmployeeField = typeof employeeColumns[number]
 
@@ -33,16 +36,59 @@ function inputBinds(input: EmployeeInput): { columns: EmployeeField[]; values: u
 export const employeeService = {
   async list(): Promise<Record<string, unknown>[]> {
     const rows = await executeQuery<DbRow>(
-      `SELECT E.ID, E.USER_ID,
-              COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
-              COALESCE(U.EMAIL, '—') AS EMAIL,
-              E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
-              D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS,
-              E.CREATED_AT, E.UPDATED_AT
-       FROM ${employeesTable} E
-       LEFT JOIN ${usersTable} U ON U.ID = E.USER_ID
-       LEFT JOIN ${departmentsTable} D ON D.ID = E.DEPARTMENT_ID
-       ORDER BY E.ID DESC`,
+      `WITH PENDING_SUMMARY AS (
+        SELECT
+          L.EMPLOYEE_ID,
+          COUNT(L.ID) AS PENDING_COUNT,
+          LISTAGG(DISTINCT COALESCE(T.NAME, 'Not specified'), ', ') WITHIN GROUP (ORDER BY COALESCE(T.NAME, 'Not specified') ASC) AS PENDING_TYPE_NAMES
+        FROM ${leaveRequestsTable} L
+        LEFT JOIN ${leaveTypesTable} T ON T.ID = L.LEAVE_TYPE_ID
+        WHERE L.STATUS = 'PENDING'
+        GROUP BY L.EMPLOYEE_ID
+      ),
+      FIRST_PENDING AS (
+        SELECT
+          L.EMPLOYEE_ID,
+          COALESCE(T.NAME, 'Not specified') AS FIRST_PENDING_NAME,
+          COALESCE(T.CODE, 'OTHER') AS FIRST_PENDING_CODE,
+          COALESCE(T.IS_PAID, TRUE) AS FIRST_PENDING_IS_PAID,
+          ROW_NUMBER() OVER (PARTITION BY L.EMPLOYEE_ID ORDER BY L.CREATED_AT ASC) AS RN
+        FROM ${leaveRequestsTable} L
+        LEFT JOIN ${leaveTypesTable} T ON T.ID = L.LEAVE_TYPE_ID
+        WHERE L.STATUS = 'PENDING'
+      ),
+      TODAY_LEAVE AS (
+        SELECT
+          L.EMPLOYEE_ID,
+          COALESCE(T.NAME, 'Leave') AS TODAY_LEAVE_NAME,
+          COALESCE(T.CODE, 'LEAVE') AS TODAY_LEAVE_CODE,
+          ROW_NUMBER() OVER (PARTITION BY L.EMPLOYEE_ID ORDER BY L.START_DATE ASC) AS RN
+        FROM ${leaveRequestsTable} L
+        LEFT JOIN ${leaveTypesTable} T ON T.ID = L.LEAVE_TYPE_ID
+        WHERE L.STATUS = 'APPROVED'
+          AND CURRENT_DATE() BETWEEN L.START_DATE AND L.END_DATE
+      )
+      SELECT E.ID, E.USER_ID,
+             COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
+             COALESCE(U.EMAIL, '—') AS EMAIL,
+             E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
+             D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS,
+             COALESCE(PS.PENDING_COUNT, 0) AS PENDING_LEAVE_COUNT,
+             PS.PENDING_TYPE_NAMES,
+             FP.FIRST_PENDING_NAME,
+             FP.FIRST_PENDING_CODE,
+             FP.FIRST_PENDING_IS_PAID,
+             CASE WHEN TL.EMPLOYEE_ID IS NOT NULL THEN TRUE ELSE FALSE END AS ON_LEAVE_TODAY,
+             TL.TODAY_LEAVE_NAME,
+             TL.TODAY_LEAVE_CODE,
+             E.CREATED_AT, E.UPDATED_AT
+      FROM ${employeesTable} E
+      LEFT JOIN ${usersTable} U ON U.ID = E.USER_ID
+      LEFT JOIN ${departmentsTable} D ON D.ID = E.DEPARTMENT_ID
+      LEFT JOIN PENDING_SUMMARY PS ON PS.EMPLOYEE_ID = E.ID
+      LEFT JOIN FIRST_PENDING FP ON FP.EMPLOYEE_ID = E.ID AND FP.RN = 1
+      LEFT JOIN TODAY_LEAVE TL ON TL.EMPLOYEE_ID = E.ID AND TL.RN = 1
+      ORDER BY E.ID DESC`,
     )
     return rows.map(toApiRow)
   },

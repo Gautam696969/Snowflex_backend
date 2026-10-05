@@ -13,6 +13,13 @@ export interface LeaveInput {
   documentUrl?: string | null
 }
 
+export interface LeaveListFilters {
+  leaveTypeId?: number
+  status?: string
+  sortBy?: string
+  sortOrder?: 'ASC' | 'DESC'
+}
+
 export function calculateWorkingDays(startDate: string, endDate: string, halfDaySession?: string | null): number {
   const start = new Date(`${startDate}T00:00:00Z`)
   const end = new Date(`${endDate}T00:00:00Z`)
@@ -38,7 +45,16 @@ export function calculateWorkingDays(startDate: string, endDate: string, halfDay
 
 export const leaveService = {
   async create(userId: number, input: LeaveInput): Promise<{ id: number; daysCount: number }> {
-    const empRows = await executeQuery<DbRow>('SELECT ID FROM EMPLOYEES WHERE USER_ID = ?', [userId])
+    let empRows = await executeQuery<DbRow>('SELECT ID FROM EMPLOYEES WHERE USER_ID = ?', [userId])
+    if (!empRows[0]) {
+      const empCode = `EMP-${String(userId).padStart(6, '0')}`
+      await executeInsert(
+        `INSERT INTO EMPLOYEES (USER_ID, EMPLOYEE_CODE, STATUS, CREATED_AT, UPDATED_AT)
+         VALUES (?, ?, 'ACTIVE', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())`,
+        [userId, empCode]
+      ).catch(() => {})
+      empRows = await executeQuery<DbRow>('SELECT ID FROM EMPLOYEES WHERE USER_ID = ?', [userId])
+    }
     if (!empRows[0]) throw new HttpError(404, 'Employee profile not found')
     const employeeId = Number(empRows[0].ID)
 
@@ -142,11 +158,10 @@ export const leaveService = {
 
     // Notify all ADMINS with leave type
     const dateRange = input.startDate === input.endDate ? input.startDate : `${input.startDate} to ${input.endDate}`
-    const daysLabel = daysCount === 1 ? '1 day' : `${daysCount} days`
     await notificationService.notifyAdmins({
       type: 'LEAVE_REQUESTED',
       title: 'New Leave Request',
-      message: `${employeeName} requested ${daysLabel} of ${leaveType.name} (${dateRange})`,
+      message: `${employeeName} requested ${leaveType.name} (${dateRange})`,
       link: '/dashboard?view=leaves',
       relatedId: leaveId,
     }).catch((err) => {
@@ -158,15 +173,20 @@ export const leaveService = {
 
   async listForUser(userId: number): Promise<Record<string, unknown>[]> {
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, L.LEAVE_TYPE_ID, T.NAME AS LEAVE_TYPE, T.CODE AS LEAVE_TYPE_CODE,
-              T.IS_PAID, T.YEARLY_QUOTA, T.REQUIRES_DOCUMENT,
+      `SELECT L.ID, L.EMPLOYEE_ID, L.LEAVE_TYPE_ID,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
+              COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
+              COALESCE(T.IS_PAID, TRUE) AS IS_PAID,
+              T.YEARLY_QUOTA,
+              COALESCE(T.REQUIRES_DOCUMENT, FALSE) AS REQUIRES_DOCUMENT,
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
               L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
-       JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
+       LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        WHERE E.USER_ID = ?
        ORDER BY L.CREATED_AT DESC`,
       [userId]
@@ -174,11 +194,45 @@ export const leaveService = {
     return rows.map(toApiRow)
   },
 
-  async listAll(): Promise<Record<string, unknown>[]> {
+  async listAll(filters?: LeaveListFilters): Promise<Record<string, unknown>[]> {
+    const whereClauses: string[] = []
+    const params: (string | number | boolean | null)[] = []
+
+    if (filters?.leaveTypeId) {
+      whereClauses.push('L.LEAVE_TYPE_ID = ?')
+      params.push(Number(filters.leaveTypeId))
+    }
+
+    if (filters?.status && filters.status !== 'ALL') {
+      whereClauses.push('L.STATUS = ?')
+      params.push(filters.status.toUpperCase())
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
+
+    const sortOrder = filters?.sortOrder === 'ASC' ? 'ASC' : 'DESC'
+    let orderClause = 'ORDER BY L.CREATED_AT DESC'
+    if (filters?.sortBy === 'leave_type') {
+      orderClause = `ORDER BY COALESCE(T.NAME, 'Not specified') ${sortOrder}`
+    } else if (filters?.sortBy === 'employee') {
+      orderClause = `ORDER BY U.FULL_NAME ${sortOrder}`
+    } else if (filters?.sortBy === 'start_date') {
+      orderClause = `ORDER BY L.START_DATE ${sortOrder}`
+    } else if (filters?.sortBy === 'days_count') {
+      orderClause = `ORDER BY COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) ${sortOrder}`
+    } else if (filters?.sortBy === 'status') {
+      orderClause = `ORDER BY L.STATUS ${sortOrder}`
+    }
+
     const rows = await executeQuery<DbRow>(
       `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL,
-              L.LEAVE_TYPE_ID, T.NAME AS LEAVE_TYPE, T.CODE AS LEAVE_TYPE_CODE,
-              T.IS_PAID, T.YEARLY_QUOTA, T.REQUIRES_DOCUMENT,
+              L.LEAVE_TYPE_ID,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
+              COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
+              COALESCE(T.IS_PAID, TRUE) AS IS_PAID,
+              T.YEARLY_QUOTA,
+              COALESCE(T.REQUIRES_DOCUMENT, FALSE) AS REQUIRES_DOCUMENT,
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
@@ -190,18 +244,54 @@ export const leaveService = {
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
        JOIN USERS U ON U.ID = E.USER_ID
-       JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
+       LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        LEFT JOIN LEAVE_BALANCES B ON B.EMPLOYEE_ID = L.EMPLOYEE_ID AND B.LEAVE_TYPE_ID = L.LEAVE_TYPE_ID AND B.YEAR = YEAR(L.START_DATE)
-       ORDER BY L.CREATED_AT DESC`
+       ${whereSql}
+       ${orderClause}`,
+      params
     )
     return rows.map(toApiRow)
   },
 
-  async listForManager(userId: number): Promise<Record<string, unknown>[]> {
+  async listForManager(userId: number, filters?: LeaveListFilters): Promise<Record<string, unknown>[]> {
+    const whereClauses: string[] = ['M.USER_ID = ?']
+    const params: (string | number | boolean | null)[] = [userId]
+
+    if (filters?.leaveTypeId) {
+      whereClauses.push('L.LEAVE_TYPE_ID = ?')
+      params.push(Number(filters.leaveTypeId))
+    }
+
+    if (filters?.status && filters.status !== 'ALL') {
+      whereClauses.push('L.STATUS = ?')
+      params.push(filters.status.toUpperCase())
+    }
+
+    const whereSql = `WHERE ${whereClauses.join(' AND ')}`
+
+    const sortOrder = filters?.sortOrder === 'ASC' ? 'ASC' : 'DESC'
+    let orderClause = 'ORDER BY L.CREATED_AT DESC'
+    if (filters?.sortBy === 'leave_type') {
+      orderClause = `ORDER BY COALESCE(T.NAME, 'Not specified') ${sortOrder}`
+    } else if (filters?.sortBy === 'employee') {
+      orderClause = `ORDER BY U.FULL_NAME ${sortOrder}`
+    } else if (filters?.sortBy === 'start_date') {
+      orderClause = `ORDER BY L.START_DATE ${sortOrder}`
+    } else if (filters?.sortBy === 'days_count') {
+      orderClause = `ORDER BY COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) ${sortOrder}`
+    } else if (filters?.sortBy === 'status') {
+      orderClause = `ORDER BY L.STATUS ${sortOrder}`
+    }
+
     const rows = await executeQuery<DbRow>(
       `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL,
-              L.LEAVE_TYPE_ID, T.NAME AS LEAVE_TYPE, T.CODE AS LEAVE_TYPE_CODE,
-              T.IS_PAID, T.YEARLY_QUOTA, T.REQUIRES_DOCUMENT,
+              L.LEAVE_TYPE_ID,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
+              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
+              COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
+              COALESCE(T.IS_PAID, TRUE) AS IS_PAID,
+              T.YEARLY_QUOTA,
+              COALESCE(T.REQUIRES_DOCUMENT, FALSE) AS REQUIRES_DOCUMENT,
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
@@ -213,12 +303,12 @@ export const leaveService = {
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
        JOIN USERS U ON U.ID = E.USER_ID
-       JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
+       LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        JOIN EMPLOYEES M ON M.ID = E.MANAGER_ID
        LEFT JOIN LEAVE_BALANCES B ON B.EMPLOYEE_ID = L.EMPLOYEE_ID AND B.LEAVE_TYPE_ID = L.LEAVE_TYPE_ID AND B.YEAR = YEAR(L.START_DATE)
-       WHERE M.USER_ID = ?
-       ORDER BY L.CREATED_AT DESC`,
-      [userId]
+       ${whereSql}
+       ${orderClause}`,
+      params
     )
     return rows.map(toApiRow)
   },

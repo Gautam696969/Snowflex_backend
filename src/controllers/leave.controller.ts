@@ -11,9 +11,15 @@ export const leaveController = {
   },
   async list(request: Request, response: Response, next: NextFunction) {
     try {
+      const filters = {
+        leaveTypeId: request.query.leaveTypeId ? Number(request.query.leaveTypeId) : undefined,
+        status: request.query.status ? String(request.query.status) : undefined,
+        sortBy: request.query.sortBy ? String(request.query.sortBy) : undefined,
+        sortOrder: request.query.sortOrder === 'asc' ? ('ASC' as const) : ('DESC' as const),
+      }
       const rows = request.user!.role === 'MANAGER'
-        ? await leaveService.listForManager(request.user!.id)
-        : await leaveService.listAll()
+        ? await leaveService.listForManager(request.user!.id, filters)
+        : await leaveService.listAll(filters)
       sendSuccess(response, 200, 'Leave requests fetched successfully', rows)
     } catch (error) { next(error) }
   },
