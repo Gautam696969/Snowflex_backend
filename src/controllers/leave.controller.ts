@@ -4,7 +4,7 @@ import { sendSuccess } from '../utils/apiResponse'
 
 export const leaveController = {
   async create(request: Request, response: Response, next: NextFunction) {
-    try { await leaveService.create(request.user!.id, request.body); sendSuccess(response, 201, 'Leave request submitted', null) } catch (error) { next(error) }
+    try { const result = await leaveService.create(request.user!.id, request.body); sendSuccess(response, 201, 'Leave request submitted', result) } catch (error) { next(error) }
   },
   async mine(request: Request, response: Response, next: NextFunction) {
     try { sendSuccess(response, 200, 'Leave requests fetched successfully', await leaveService.listForUser(request.user!.id)) } catch (error) { next(error) }

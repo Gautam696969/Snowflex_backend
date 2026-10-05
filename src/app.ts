@@ -16,9 +16,12 @@ import { employeeRouter } from './routes/employee.routes'
 import { departmentRouter } from './routes/department.routes'
 import { attendanceRouter } from './routes/attendance.routes'
 import { leaveRouter } from './routes/leave.routes'
+import { leaveTypeRouter } from './routes/leave-type.routes'
+import { leaveBalanceRouter } from './routes/leave-balance.routes'
 import { taskRouter } from './routes/task.routes'
 import { dashboardRouter } from './routes/dashboard.routes'
 import { userRouter } from './routes/user.routes'
+import { notificationRouter } from './routes/notification.routes'
 import { isSnowflakeConnected } from './config/snowflake'
 
 function allowedOrigins(): Set<string> {
@@ -88,8 +91,17 @@ export function createApp(service?: AuthServiceContract): Express {
   app.use('/api/departments', departmentRouter)
   app.use('/api/attendance', attendanceRouter)
   app.use('/api/leaves', leaveRouter)
+  app.use('/leaves', leaveRouter)
+  app.use('/api/leave-requests', leaveRouter)
+  app.use('/leave-requests', leaveRouter)
+  app.use('/api/leave-types', leaveTypeRouter)
+  app.use('/leave-types', leaveTypeRouter)
+  app.use('/api/leave-balances', leaveBalanceRouter)
+  app.use('/leave-balances', leaveBalanceRouter)
   app.use('/api/tasks', taskRouter)
   app.use('/api/dashboard', dashboardRouter)
+  app.use('/api/notifications', notificationRouter)
+  app.use('/notifications', notificationRouter)
   app.use((_request, response) => {
     response.status(404).json({ success: false, message: 'Not found' })
   })

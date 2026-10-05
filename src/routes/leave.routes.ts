@@ -7,10 +7,12 @@ import { validateBody, validateParams } from '../middleware/validation.middlewar
 
 const idSchema = z.object({ id: z.coerce.number().int().positive() })
 const createSchema = z.object({
-  leaveTypeId: z.number().int().positive(),
+  leaveTypeId: z.coerce.number().int().positive(),
   startDate: z.string().date(),
   endDate: z.string().date(),
   reason: z.string().trim().min(1).max(2000),
+  halfDaySession: z.enum(['FIRST_HALF', 'SECOND_HALF']).optional().nullable(),
+  documentUrl: z.string().trim().max(500).optional().nullable(),
 }).refine((value) => value.endDate >= value.startDate, { path: ['endDate'], message: 'End date must be on or after start date' })
 const rejectSchema = z.object({ reason: z.string().trim().min(1).max(1000) })
 
