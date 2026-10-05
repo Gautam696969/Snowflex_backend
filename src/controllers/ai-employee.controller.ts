@@ -35,6 +35,17 @@ export const aiEmployeeController = {
     } catch (error) { next(error) }
   },
 
+  async widgetChat(request: Request, response: Response, next: NextFunction) {
+    try {
+      const result = await aiEmployeeService.widgetChat(request.user!.id, request.user!.role, {
+        source: 'widget',
+        message: String(request.body?.message ?? ''),
+        history: request.body?.history,
+      })
+      sendSuccess(response, 200, 'Message sent successfully', result)
+    } catch (error) { next(error) }
+  },
+
   async deleteConversation(request: Request, response: Response, next: NextFunction) {
     try {
       const conversationId = Number(request.params.conversationId)

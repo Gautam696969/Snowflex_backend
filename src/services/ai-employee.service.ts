@@ -110,6 +110,20 @@ async function getLeaveTodayReply(userId: number, role: string): Promise<string>
   return [heading, ...entries].join('\n')
 }
 
+async function generateReply(userId: number, role: string, userMessage: string, messages: AiChatMessage[]) {
+  if (asksWhoIsOnLeaveToday(userMessage)) {
+    return { reply: await getLeaveTodayReply(userId, role), model: 'SNOWFLAKE_LIVE_DATA' }
+  }
+
+  try {
+    const result = await aiClient.chat(messages)
+    return { reply: result.reply, model: result.model }
+  } catch (aiError) {
+    logger.error('AI provider call failed', { error: aiError instanceof Error ? aiError.message : String(aiError) })
+    throw new HttpError(502, 'AI provider is unavailable. Please try again later.')
+  }
+}
+
 export const aiEmployeeService = {
   async listConversations(userId: number): Promise<AiConversation[]> {
     const rows = await executeQuery<Record<string, unknown>>(
@@ -182,21 +196,7 @@ export const aiEmployeeService = {
 
     const messages: AiChatMessage[] = [{ role: 'system', content: buildSystemPrompt(userId, role) }, ...history]
 
-    let reply: string
-    let model: string
-    if (asksWhoIsOnLeaveToday(userMessage)) {
-      reply = await getLeaveTodayReply(userId, role)
-      model = 'SNOWFLAKE_LIVE_DATA'
-    } else {
-      try {
-        const result = await aiClient.chat(messages)
-        reply = result.reply
-        model = result.model
-      } catch (aiError) {
-        logger.error('AI provider call failed', { error: aiError instanceof Error ? aiError.message : String(aiError) })
-        throw new HttpError(502, 'AI provider is unavailable. Please try again later.')
-      }
-    }
+    const { reply, model } = await generateReply(userId, role, userMessage, messages)
 
     await executeInsert(
       `INSERT INTO ${messagesTable} (CONVERSATION_ID, ROLE, CONTENT, MODEL) VALUES (?, 'ASSISTANT', ?, ?)`,
@@ -229,6 +229,40 @@ export const aiEmployeeService = {
     return {
       conversation: toApiConversation(convRows[0]),
       message: toApiMessage(messageRows[0]),
+    }
+  },
+
+  async widgetChat(
+    userId: number,
+    role: string,
+    payload: {
+      source: 'widget'
+      message: string
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    },
+  ): Promise<{ message: { id: string; role: 'assistant'; content: string; model: string; createdAt: string } }> {
+    const userMessage = payload.message.trim()
+    if (!userMessage) throw new HttpError(422, 'Message is required')
+
+    const history: AiChatMessage[] = (payload.history ?? []).slice(-20).map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+    const messages: AiChatMessage[] = [
+      { role: 'system', content: buildSystemPrompt(userId, role) },
+      ...history,
+      { role: 'user', content: userMessage },
+    ]
+    const { reply, model } = await generateReply(userId, role, userMessage, messages)
+
+    return {
+      message: {
+        id: randomUUID(),
+        role: 'assistant',
+        content: reply,
+        model,
+        createdAt: new Date().toISOString(),
+      },
     }
   },
 
