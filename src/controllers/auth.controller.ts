@@ -40,5 +40,26 @@ export function createAuthController(service: AuthServiceContract = authService)
     logout: (_request: Request, response: Response) => {
       sendSuccess(response, 200, 'Logout successful', null)
     },
+
+    forgotPassword: async (request: Request, response: Response, next: NextFunction) => {
+      try {
+        const { email } = request.body as { email: string }
+        const origin = request.get('origin') || request.get('referer')
+        await service.forgotPassword(email, origin)
+        sendSuccess(response, 200, 'If this email exists, a reset link has been sent', null)
+      } catch (error) {
+        next(error)
+      }
+    },
+
+    resetPassword: async (request: Request, response: Response, next: NextFunction) => {
+      try {
+        const { token, password } = request.body as { token: string; password: string }
+        await service.resetPassword(token, password)
+        sendSuccess(response, 200, 'Password reset successful', null)
+      } catch (error) {
+        next(error)
+      }
+    },
   }
 }
