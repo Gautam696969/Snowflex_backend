@@ -2,20 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { getGroqConfigOrThrow } from '../config/groq'
 import { logger } from '../utils/logger'
 
-interface MulterFile {
-  fieldname: string
-  originalname: string
-  encoding: string
-  mimetype: string
-  size: number
-  buffer: Buffer
-  destination?: string
-  filename?: string
-  path?: string
-}
-
 export interface VoiceTranscribeRequest extends Request {
-  file?: MulterFile
   body: { language?: string }
 }
 

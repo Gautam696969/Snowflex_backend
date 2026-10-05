@@ -36,9 +36,28 @@ async function startServer(): Promise<void> {
 
   await verifyMailSetup()
 
-  createApp().listen(env.PORT, () => {
+  const server = createApp().listen(env.PORT, () => {
     logger.success(`Server running on port ${env.PORT}`)
   })
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error(`Port ${env.PORT} is already in use by another process. Please stop the existing process or choose a different port.`)
+    } else {
+      logger.error(`Server error: ${err.message}`)
+    }
+    process.exit(1)
+  })
+
+  const shutdown = () => {
+    logger.info('Shutting down server...')
+    server.close(() => {
+      process.exit(0)
+    })
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
 void startServer()

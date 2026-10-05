@@ -3,6 +3,8 @@ import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import express, { Express } from 'express'
+import fs from 'node:fs'
+import path from 'node:path'
 import { createAdminRouter } from './routes/admin.routes'
 import { errorHandler } from './middleware/error.middleware'
 import { requestLogger } from './middleware/request-logger.middleware'
@@ -16,6 +18,7 @@ import { attendanceRouter } from './routes/attendance.routes'
 import { leaveRouter } from './routes/leave.routes'
 import { taskRouter } from './routes/task.routes'
 import { dashboardRouter } from './routes/dashboard.routes'
+import { userRouter } from './routes/user.routes'
 import { isSnowflakeConnected } from './config/snowflake'
 
 function allowedOrigins(): Set<string> {
@@ -38,7 +41,9 @@ export function createApp(service?: AuthServiceContract): Express {
   const origins = allowedOrigins()
 
   app.disable('x-powered-by')
-  app.use(helmet())
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }))
   app.use(requestLogger)
   app.use(
     cors({
@@ -56,6 +61,13 @@ export function createApp(service?: AuthServiceContract): Express {
     }),
   )
   app.use(express.json({ limit: '32kb' }))
+
+  const uploadsDir = path.resolve(process.cwd(), 'uploads')
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true })
+  }
+  app.use('/uploads', express.static(uploadsDir))
+
   app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false }))
 
   app.get('/api/health', (_request, response) => {
@@ -68,6 +80,8 @@ export function createApp(service?: AuthServiceContract): Express {
   })
   app.use('/api/auth', createAuthRouter(service))
   app.use('/api/admin', createAdminRouter(service))
+  app.use('/api/users', userRouter)
+  app.use('/users', userRouter)
   app.use('/api/ai-employee', aiEmployeeRouter)
   app.use('/api/voice', voiceRouter)
   app.use('/api/employees', employeeRouter)
