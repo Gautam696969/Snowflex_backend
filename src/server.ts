@@ -4,6 +4,7 @@ import { testSnowflakeConnection } from './config/snowflake'
 import { getEnvironment } from './config/env'
 import { validateGroqConfig } from './config/groq'
 import { logger } from './utils/logger'
+import { verifyMailSetup } from './services/email.service'
 
 async function startServer(): Promise<void> {
   let env: ReturnType<typeof getEnvironment>
@@ -32,6 +33,8 @@ async function startServer(): Promise<void> {
     process.exitCode = 1
     return
   }
+
+  await verifyMailSetup()
 
   createApp().listen(env.PORT, () => {
     logger.success(`Server running on port ${env.PORT}`)

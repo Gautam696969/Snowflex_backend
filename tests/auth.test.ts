@@ -26,6 +26,8 @@ const service: AuthServiceContract = {
     }
     return { token: createToken(safeUser), user: safeUser }
   }),
+  forgotPassword: vi.fn(async () => {}),
+  resetPassword: vi.fn(async () => {}),
 }
 
 const app = createApp(service)
@@ -35,6 +37,8 @@ beforeEach(() => {
   vi.mocked(service.register).mockResolvedValue(undefined)
   vi.mocked(service.getUserById).mockResolvedValue(safeUser)
   vi.mocked(service.listUsers).mockResolvedValue([safeUser])
+  vi.mocked(service.forgotPassword).mockResolvedValue(undefined)
+  vi.mocked(service.resetPassword).mockResolvedValue(undefined)
   vi.mocked(service.login).mockImplementation(async (email, password) => {
     if (email !== safeUser.email || password !== 'Password123') {
       throw new HttpError(401, 'Invalid email or password')
@@ -186,6 +190,48 @@ describe('role-protected employee APIs', () => {
       .set('Authorization', `Bearer ${employeeToken}`)
       .send({ userId: 5, employeeCode: 'E-005' })
       .expect(403, { success: false, message: 'Forbidden', error: null })
+  })
+})
+
+describe('forgot and reset password', () => {
+  it('handles forgot-password request and returns uniform success message', async () => {
+    await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'john@example.com' })
+      .expect(200, {
+        success: true,
+        message: 'If this email exists, a reset link has been sent',
+        data: null,
+      })
+    expect(service.forgotPassword).toHaveBeenCalledWith('john@example.com', undefined)
+  })
+
+  it('validates email on forgot-password', async () => {
+    await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'not-an-email' })
+      .expect(422)
+    expect(service.forgotPassword).not.toHaveBeenCalled()
+  })
+
+  it('handles reset-password request successfully', async () => {
+    await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token: 'secure-token-123', password: 'NewPassword123' })
+      .expect(200, {
+        success: true,
+        message: 'Password reset successful',
+        data: null,
+      })
+    expect(service.resetPassword).toHaveBeenCalledWith('secure-token-123', 'NewPassword123')
+  })
+
+  it('validates reset-password inputs', async () => {
+    await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token: '', password: 'short' })
+      .expect(422)
+    expect(service.resetPassword).not.toHaveBeenCalled()
   })
 })
 

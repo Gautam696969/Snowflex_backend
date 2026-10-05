@@ -16,6 +16,15 @@ const loginSchema = z.object({
   password: z.string().min(1).max(72),
 })
 
+const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().max(255),
+})
+
+const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1),
+  password: z.string().min(8).max(72),
+})
+
 export function createAuthRouter(service?: AuthServiceContract): Router {
   const router = Router()
   const controller = createAuthController(service)
@@ -29,6 +38,18 @@ export function createAuthRouter(service?: AuthServiceContract): Router {
     '/login',
     validateBody(loginSchema),
     controller.login,
+  )
+
+  router.post(
+    '/forgot-password',
+    validateBody(forgotPasswordSchema),
+    controller.forgotPassword,
+  )
+
+  router.post(
+    '/reset-password',
+    validateBody(resetPasswordSchema),
+    controller.resetPassword,
   )
 
   router.get('/me', requireAuth, controller.me)
