@@ -50,6 +50,7 @@ interface UserRow {
   EMAIL: string
   PASSWORD_HASH: string
   ROLE: string
+  AVATAR_URL?: string | null
 }
 
 export interface LoginResult {
@@ -76,12 +77,16 @@ async function findUserByEmail(email: string): Promise<UserRow | undefined> {
 }
 
 function toSafeUser(user: UserRow): AuthenticatedUser {
-  return {
+  const safe: AuthenticatedUser = {
     id: Number(user.ID),
     fullName: user.FULL_NAME,
     email: user.EMAIL,
     role: user.ROLE === 'USER' ? 'EMPLOYEE' : user.ROLE,
   }
+  if (user.AVATAR_URL) {
+    safe.avatarUrl = String(user.AVATAR_URL)
+  }
+  return safe
 }
 
 function toTokenPayload(user: AuthenticatedUser) {
