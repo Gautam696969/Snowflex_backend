@@ -179,6 +179,39 @@ describe('admin users route', () => {
     expect(response.body).toEqual({ success: true, message: 'Users fetched successfully', data: [safeUser] })
     expect(JSON.stringify(response.body)).not.toContain('PASSWORD_HASH')
   })
+
+  it('blocks non-admin users from role governance, system telemetry, and test email', async () => {
+    const userToken = createToken({ id: safeUser.id, email: safeUser.email, role: 'USER' })
+    await request(app)
+      .patch('/api/admin/users/1/role')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ role: 'MANAGER' })
+      .expect(403, { success: false, message: 'Forbidden', error: null })
+
+    await request(app)
+      .get('/api/admin/system')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(403, { success: false, message: 'Forbidden', error: null })
+
+    await request(app)
+      .post('/api/admin/test-email')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ email: 'test@example.com' })
+      .expect(403, { success: false, message: 'Forbidden', error: null })
+  })
+
+  it('prevents an administrator from demoting themselves', async () => {
+    const adminToken = createToken({ id: 99, email: 'admin@example.com', role: 'ADMIN' })
+    await request(app)
+      .patch('/api/admin/users/99/role')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ role: 'EMPLOYEE' })
+      .expect(400, {
+        success: false,
+        message: 'You cannot remove your own administrator privileges.',
+        error: null,
+      })
+  })
 })
 
 describe('role-protected employee APIs', () => {
