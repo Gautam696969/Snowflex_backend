@@ -14,13 +14,15 @@ declare global {
 export function requireAuth(request: Request, response: Response, next: NextFunction): void {
   const authorization = request.header('Authorization')
   const match = authorization?.match(/^Bearer\s+(.+)$/i)
-  if (!match) {
+  const tokenString = match ? match[1] : (typeof request.query.token === 'string' ? request.query.token : null)
+
+  if (!tokenString) {
     sendError(response, 401, 'Unauthorized')
     return
   }
 
   try {
-    request.user = verifyToken(match[1])
+    request.user = verifyToken(tokenString)
     next()
   } catch {
     sendError(response, 401, 'Unauthorized')
