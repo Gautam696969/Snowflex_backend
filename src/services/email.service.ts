@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer'
+import nodemailer, { type Transporter } from 'nodemailer'
 import { logger } from '../utils/logger'
 
 interface SendResetEmailOptions {
@@ -17,7 +17,7 @@ function getMailConfig() {
   return { host, port, user, pass, from, isConfigured: Boolean(user && pass) }
 }
 
-export function createMailTransporter(): nodemailer.Transporter | null {
+export function createMailTransporter(): Transporter | null {
   const config = getMailConfig()
   if (!config.isConfigured) {
     return null

@@ -187,7 +187,7 @@ export const authService: AuthServiceContract = {
 
     try {
       await ensurePasswordResetTable()
-      interface TokenRow {
+      interface TokenRow extends Record<string, unknown> {
         ID: number
         USER_ID: number
         EXPIRES_AT: string
