@@ -38,7 +38,7 @@ leaveTypeRouter.get('/', leaveTypeController.list)
 leaveTypeRouter.get('/:id', validateParams(idSchema), leaveTypeController.get)
 
 // Admin and HR operations
-leaveTypeRouter.post('/', authorizeRoles('ADMIN', 'HR'), validateBody(createTypeSchema), leaveTypeController.create)
-leaveTypeRouter.put('/:id', authorizeRoles('ADMIN', 'HR'), validateParams(idSchema), validateBody(updateTypeSchema), leaveTypeController.update)
-leaveTypeRouter.patch('/:id/toggle', authorizeRoles('ADMIN', 'HR'), validateParams(idSchema), validateBody(toggleSchema), leaveTypeController.toggle)
-leaveTypeRouter.delete('/:id', authorizeRoles('ADMIN', 'HR'), validateParams(idSchema), leaveTypeController.delete)
+leaveTypeRouter.post('/', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR'), validateBody(createTypeSchema), leaveTypeController.create)
+leaveTypeRouter.put('/:id', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR'), validateParams(idSchema), validateBody(updateTypeSchema), leaveTypeController.update)
+leaveTypeRouter.patch('/:id/toggle', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR'), validateParams(idSchema), validateBody(toggleSchema), leaveTypeController.toggle)
+leaveTypeRouter.delete('/:id', authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR'), validateParams(idSchema), leaveTypeController.delete)

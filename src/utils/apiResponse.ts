@@ -9,6 +9,6 @@ export function sendSuccess<T>(
   response.status(statusCode).json({ success: true, message, data })
 }
 
-export function sendError(response: Response, statusCode: number, message: string): void {
-  response.status(statusCode).json({ success: false, message, error: null })
+export function sendError(response: Response, statusCode: number, message: string, details?: Record<string, unknown>): void {
+  response.status(statusCode).json({ success: false, message, error: null, ...(details || {}) })
 }

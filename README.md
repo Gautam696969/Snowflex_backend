@@ -58,7 +58,41 @@ Startup validates the configuration, prints `Connecting to Snowflake...`, waits 
 
 ## Snowflake Setup
 
-`AUTH_PROJECT.PUBLIC.USERS` is an existing table. Do not recreate or drop it. Run `sql/001_create_tables.sql` with a role that can create tables in `AUTH_PROJECT.PUBLIC`; it creates only the supporting `EMPLOYEES`, `DEPARTMENTS`, `ATTENDANCE`, `LEAVE_TYPES`, `LEAVE_REQUESTS`, and `TASKS` tables. Run `sql/002_seed_data.sql` for `CASUAL`, `SICK`, and `ANNUAL` leave types, then `sql/003_backfill_employee_profiles.sql` to link existing users that do not yet have employee profiles.
+`AUTH_PROJECT.PUBLIC.USERS` is an existing table. Do not recreate or drop it. Run `sql/001_create_tables.sql` first, then `sql/003_backfill_employee_profiles.sql`, and then `sql/migrations/001_leave_api_schema.sql`. The consolidated migration is idempotent: it adds the current leave/profile columns, creates missing leave/notification tables, seeds the default leave types, and backfills leave history and current-year balances. It supersedes `sql/002_seed_data.sql` and `sql/004_leave_approval_hierarchy.sql` for this setup; use the consolidated migration instead of applying those older partial leave scripts separately.
+
+This repository does not define a `USERS` role CHECK constraint. Widen the existing role column before promotion if it is narrower than 50 characters:
+
+```sql
+ALTER TABLE AUTH_PROJECT.PUBLIC.USERS ALTER COLUMN ROLE SET DATA TYPE VARCHAR(50);
+```
+
+To promote one existing user, first confirm the email matches exactly one row, then use that row's ID:
+
+```sql
+SELECT ID, FULL_NAME, EMAIL, ROLE
+FROM AUTH_PROJECT.PUBLIC.USERS
+WHERE LOWER(EMAIL) = LOWER('<SUPER_ADMIN_EMAIL>');
+
+UPDATE AUTH_PROJECT.PUBLIC.USERS
+SET ROLE = 'SUPER_ADMIN'
+WHERE ID = <USER_ID_FROM_SELECT>;
+```
+
+If the deployed `USERS` table has a role CHECK constraint that is not defined here, inspect its existing name and definition before replacing it:
+
+```sql
+SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+FROM AUTH_PROJECT.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+JOIN AUTH_PROJECT.INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc
+  ON cc.CONSTRAINT_CATALOG = tc.CONSTRAINT_CATALOG
+ AND cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+ AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+WHERE tc.TABLE_SCHEMA = 'PUBLIC'
+  AND tc.TABLE_NAME = 'USERS'
+  AND tc.CONSTRAINT_TYPE = 'CHECK';
+```
+
+Drop the exact returned constraint name and recreate it allowing `SUPER_ADMIN` plus legacy values still in use (`ADMIN`, `HR`, `MANAGER`, `EMPLOYEE`, and `USER`). Do not add a second constraint with a guessed name.
 
 Grant the service role warehouse/database/schema/table permissions for `USERS` and the new tables. Snowflake standard-table `UNIQUE` constraints are informational, so the service checks for duplicate users, departments, and employee identifiers; concurrent writers should be serialized or protected with a supported enforced-key table strategy.
 
@@ -96,12 +130,13 @@ Frontend login redirects to `/dashboard`, which loads the current profile and ro
 
 ## Roles
 
+- `SUPER_ADMIN`: top-level governance and approval of Admin and Super Admin leave requests
 - `ADMIN`: organization access and all dashboard/admin functions
 - `HR`: employees, departments, attendance, leave administration, and reports
 - `MANAGER`: direct-report directory, attendance and leave review, task assignment/management
 - `EMPLOYEE`: own profile, attendance check-in/out, leave requests, own tasks and task status
 
-The API derives user identity from a verified JWT. Client-supplied actor IDs are not trusted. `EMPLOYEE` can only read their own records; `MANAGER` reads team records; `HR`/`ADMIN` can read organization records. Creating/updating/deleting employee or department records is limited to `ADMIN`/`HR`.
+The API derives user identity and role from a verified JWT. Client-supplied actor IDs and roles are not trusted. Leave decisions are limited to the configured Admin/Super Admin hierarchy, and the API prevents demoting, deactivating, or removing the last active `SUPER_ADMIN`.
 
 ## API Endpoints
 
@@ -191,4 +226,4 @@ In Postman, use raw JSON for register/login, then set Authorization type to Bear
 
 ## Logging and Errors
 
-Morgan logs method, URL, and status only. It does not log request bodies, passwords, tokens, or Snowflake credentials. Unexpected database errors are sanitized. Validation failures return 422, authentication 401, role failures 403, missing records 404, duplicate/business conflicts 409, and unexpected errors 500.
+Morgan logs method, URL, and status only. The global error handler logs the exception chain, stack, and parameterized Snowflake SQL text without bind values; likely credential strings are redacted. Unexpected 500 responses include the root error in the `error` field outside production and remain generic in production. Validation failures return 400, authentication 401, role failures 403, missing records 404, duplicate/business conflicts 409, and unexpected errors 500.

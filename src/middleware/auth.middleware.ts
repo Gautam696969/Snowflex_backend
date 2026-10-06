@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express'
 import { AuthTokenPayload, verifyToken } from '../utils/jwt'
 import { HttpError } from '../utils/http-error'
 import { sendError } from '../utils/apiResponse'
+import { normalizeRole } from '../utils/roles'
 
 declare global {
   namespace Express {
@@ -35,7 +36,7 @@ export function authorizeRoles(...roles: string[]) {
       next(new HttpError(401, 'Unauthorized'))
       return
     }
-    if (!roles.includes(request.user.role)) {
+    if (!roles.map(normalizeRole).includes(normalizeRole(request.user.role))) {
       next(new HttpError(403, 'Forbidden'))
       return
     }

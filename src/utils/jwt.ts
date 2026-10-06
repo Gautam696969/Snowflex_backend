@@ -1,4 +1,5 @@
 import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken'
+import { normalizeRole } from './roles'
 
 export interface AuthenticatedUser {
   id: number
@@ -24,7 +25,7 @@ function getJwtSecret(): string {
 
 export function createToken(user: AuthTokenPayload): string {
   // Keep profile details out of the token; /me loads them from Snowflake.
-  const payload: AuthTokenPayload = { id: user.id, email: user.email, role: user.role }
+  const payload: AuthTokenPayload = { id: user.id, email: user.email, role: normalizeRole(user.role) }
   const options: SignOptions = { expiresIn: (process.env.JWT_EXPIRES_IN || '1d') as SignOptions['expiresIn'] }
   return jwt.sign(payload, getJwtSecret(), options)
 }
@@ -41,6 +42,6 @@ export function verifyToken(token: string): AuthTokenPayload {
   return {
     id: payload.id,
     email: payload.email,
-    role: payload.role,
+    role: normalizeRole(payload.role),
   }
 }

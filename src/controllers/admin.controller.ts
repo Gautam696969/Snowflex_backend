@@ -5,6 +5,7 @@ import { sendPasswordResetEmail } from '../services/email.service'
 import { sendSuccess } from '../utils/apiResponse'
 import { HttpError } from '../utils/http-error'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
+import { assertNotLastActiveSuperAdmin } from '../utils/super-admin-safeguards'
 
 const usersTable = snowflakeTable('USERS')
 const employeesTable = snowflakeTable('EMPLOYEES')
@@ -25,9 +26,11 @@ export function createAdminController(service: AuthServiceContract = authService
       try {
         const id = Number(request.params.id)
         const { role } = request.body as { role: string }
-        if (id === request.user?.id && role !== 'ADMIN') {
+        if (id === request.user?.id && request.user.role === 'ADMIN' && role !== 'ADMIN') {
           throw new HttpError(400, 'You cannot remove your own administrator privileges.')
         }
+
+        if (role !== 'SUPER_ADMIN') await assertNotLastActiveSuperAdmin(id, 'demote')
 
         await executeQuery(
           `UPDATE ${usersTable} SET ROLE = ? WHERE ID = ?`,
@@ -57,6 +60,7 @@ export function createAdminController(service: AuthServiceContract = authService
           users: 0,
           admins: 0,
           hr: 0,
+          superAdmins: 0,
           managers: 0,
           employees: 0,
           employeeProfiles: 0,
@@ -68,6 +72,7 @@ export function createAdminController(service: AuthServiceContract = authService
             SELECT
               (SELECT COUNT(*) FROM ${usersTable}) AS TOTAL_USERS,
               (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'ADMIN') AS TOTAL_ADMINS,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'SUPER_ADMIN') AS TOTAL_SUPER_ADMINS,
               (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'HR') AS TOTAL_HR,
               (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'MANAGER') AS TOTAL_MANAGERS,
               (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE IN ('EMPLOYEE', 'USER')) AS TOTAL_EMPLOYEES,
@@ -79,6 +84,7 @@ export function createAdminController(service: AuthServiceContract = authService
             users: Number(s.TOTAL_USERS || 0),
             admins: Number(s.TOTAL_ADMINS || 0),
             hr: Number(s.TOTAL_HR || 0),
+            superAdmins: Number(s.TOTAL_SUPER_ADMINS || 0),
             managers: Number(s.TOTAL_MANAGERS || 0),
             employees: Number(s.TOTAL_EMPLOYEES || 0),
             employeeProfiles: Number(s.TOTAL_EMPLOYEE_PROFILES || 0),

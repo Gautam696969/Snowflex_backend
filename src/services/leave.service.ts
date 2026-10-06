@@ -1,8 +1,16 @@
-import { executeInsert, executeQuery, executeUpdate } from '../config/snowflake'
+import { executeInsert, executeQuery, executeUpdate, withTransaction } from '../config/snowflake'
 import { HttpError } from '../utils/http-error'
 import { DbRow, toApiRow } from '../utils/rows'
 import { notificationService } from './notification.service'
 import { leaveBalanceService } from './leave-balance.service'
+import { normalizeRole } from '../utils/roles'
+import { logger } from '../utils/logger'
+
+const leaveRequestsTable = 'LEAVE_REQUESTS'
+const employeesTable = 'EMPLOYEES'
+const usersTable = 'USERS'
+const leaveTypesTable = 'LEAVE_TYPES'
+const notificationsTable = 'NOTIFICATIONS'
 
 export interface LeaveInput {
   leaveTypeId: number
@@ -24,7 +32,7 @@ export function calculateWorkingDays(startDate: string, endDate: string, halfDay
   const start = new Date(`${startDate}T00:00:00Z`)
   const end = new Date(`${endDate}T00:00:00Z`)
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
-    throw new HttpError(422, 'Invalid leave date range')
+    throw new HttpError(400, 'Invalid leave date range')
   }
 
   if (halfDaySession) {
@@ -44,7 +52,7 @@ export function calculateWorkingDays(startDate: string, endDate: string, halfDay
 }
 
 export const leaveService = {
-  async create(userId: number, input: LeaveInput): Promise<{ id: number; daysCount: number }> {
+  async create(userId: number, input: LeaveInput, userRole: string): Promise<{ id: number; daysCount: number }> {
     let empRows = await executeQuery<DbRow>('SELECT ID FROM EMPLOYEES WHERE USER_ID = ?', [userId])
     if (!empRows[0]) {
       const empCode = `EMP-${String(userId).padStart(6, '0')}`
@@ -82,19 +90,19 @@ export const leaveService = {
     // Calculate days count excluding weekends
     const daysCount = calculateWorkingDays(input.startDate, input.endDate, halfDaySession)
     if (daysCount <= 0) {
-      throw new HttpError(422, 'Selected date range contains no working days (weekends only)')
+      throw new HttpError(400, 'Selected date range contains no working days (weekends only)')
     }
 
     // Validate past dates (only permitted for Sick Leave)
     const today = new Date().toISOString().split('T')[0]
     if (input.startDate < today && leaveType.code !== 'SL') {
-      throw new HttpError(422, 'Past dates are only permitted for Sick Leave requests')
+      throw new HttpError(400, 'Past dates are only permitted for Sick Leave requests')
     }
 
     // Validate reason for "Other"
     const trimmedReason = (input.reason || '').trim()
     if (leaveType.code === 'OTHER' && !trimmedReason) {
-      throw new HttpError(422, 'A detailed reason is required for Other leave requests')
+      throw new HttpError(400, 'A detailed reason is required for Other leave requests')
     }
 
     // Validate overlap with existing PENDING or APPROVED requests
@@ -124,11 +132,24 @@ export const leaveService = {
       }
     }
 
+    const normalizedRole = normalizeRole(userRole)
+    const autoApproved = normalizedRole === 'SUPER_ADMIN' && !(await executeQuery<DbRow>(
+      `SELECT U.ID FROM ${usersTable} U
+       LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
+      WHERE REGEXP_REPLACE(UPPER(TRIM(U.ROLE)), '[[:space:]-]+', '_') = 'SUPER_ADMIN' AND U.ID <> ?
+         AND COALESCE(E.STATUS, 'ACTIVE') = 'ACTIVE'
+       LIMIT 1`,
+      [userId],
+    )).length
+    const initialStatus = autoApproved ? 'APPROVED' : 'PENDING'
+    const autoApprovalNote = autoApproved ? 'Auto-approved (no approver available)' : null
+
     // Insert into LEAVE_REQUESTS
     await executeInsert(
       `INSERT INTO LEAVE_REQUESTS (
-        EMPLOYEE_ID, LEAVE_TYPE_ID, START_DATE, END_DATE, TOTAL_DAYS, DAYS_COUNT, HALF_DAY_SESSION, DOCUMENT_URL, REASON, STATUS, CREATED_AT, UPDATED_AT
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())`,
+        EMPLOYEE_ID, LEAVE_TYPE_ID, START_DATE, END_DATE, TOTAL_DAYS, DAYS_COUNT, HALF_DAY_SESSION, DOCUMENT_URL, REASON,
+        STATUS, APPROVED_AT, DECIDED_AT, DECISION_NOTE, AUTO_APPROVED, CREATED_AT, UPDATED_AT
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IFF(?, CURRENT_TIMESTAMP(), NULL), IFF(?, CURRENT_TIMESTAMP(), NULL), ?, ?, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP())`,
       [
         employeeId,
         leaveType.id,
@@ -139,11 +160,19 @@ export const leaveService = {
         halfDaySession,
         input.documentUrl ?? null,
         trimmedReason,
+        initialStatus,
+        autoApproved,
+        autoApproved,
+        autoApprovalNote,
+        autoApproved,
       ]
     )
 
-    // Reserve pending days in LEAVE_BALANCES
-    await leaveBalanceService.reservePending(employeeId, leaveType.id, daysCount, leaveYear)
+    if (autoApproved) {
+      await leaveBalanceService.approveLeave(employeeId, leaveType.id, daysCount, leaveYear)
+    } else {
+      await leaveBalanceService.reservePending(employeeId, leaveType.id, daysCount, leaveYear)
+    }
 
     // Query newly created leave ID
     const newLeave = await executeQuery<DbRow>(
@@ -156,24 +185,25 @@ export const leaveService = {
     const userRow = await executeQuery<DbRow>('SELECT FULL_NAME FROM USERS WHERE ID = ?', [userId])
     const employeeName = String(userRow[0]?.FULL_NAME || 'An employee')
 
-    // Notify all ADMINS with leave type
     const dateRange = input.startDate === input.endDate ? input.startDate : `${input.startDate} to ${input.endDate}`
-    await notificationService.notifyAdmins({
-      type: 'LEAVE_REQUESTED',
-      title: 'New Leave Request',
-      message: `${employeeName} requested ${leaveType.name} (${dateRange})`,
-      link: '/dashboard?view=leaves',
-      relatedId: leaveId,
-    }).catch((err) => {
-      console.error('Failed to notify admins of leave request:', err)
-    })
+    if (!autoApproved) {
+      await notificationService.notifyLeaveReviewers(normalizedRole, userId, {
+        type: 'LEAVE_REQUESTED',
+        title: 'New Leave Request',
+        message: `${employeeName} requested ${leaveType.name} (${dateRange})`,
+        link: '/dashboard?view=leaves',
+        relatedId: leaveId,
+      }).catch((err) => {
+        console.error('Failed to notify leave reviewers:', err)
+      })
+    }
 
     return { id: leaveId, daysCount }
   },
 
   async listForUser(userId: number): Promise<Record<string, unknown>[]> {
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL, L.LEAVE_TYPE_ID,
+      `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID AS REQUESTER_USER_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL, L.LEAVE_TYPE_ID,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
               COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
@@ -183,10 +213,14 @@ export const leaveService = {
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
-              L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
+              L.REASON, L.STATUS, L.APPROVED_BY, A.FULL_NAME AS APPROVER_NAME,
+              COALESCE(L.DECIDED_AT, L.APPROVED_AT) AS DECIDED_AT,
+              COALESCE(L.DECISION_NOTE, L.REJECTION_REASON) AS DECISION_NOTE,
+              L.AUTO_APPROVED, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
       JOIN USERS U ON U.ID = E.USER_ID
+            LEFT JOIN USERS A ON A.ID = L.APPROVED_BY
        LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        WHERE E.USER_ID = ?
        ORDER BY L.CREATED_AT DESC`,
@@ -195,68 +229,21 @@ export const leaveService = {
     return rows.map(toApiRow)
   },
 
-  async listAll(filters?: LeaveListFilters): Promise<Record<string, unknown>[]> {
+  async listAll(userId: number, role: string, scope: 'team' | 'admin', filters?: LeaveListFilters): Promise<Record<string, unknown>[]> {
+    const normalizedRole = normalizeRole(role)
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(normalizedRole)) throw new HttpError(403, 'Only Admins and Super Admins can view team leave requests')
+    if (scope === 'admin' && normalizedRole !== 'SUPER_ADMIN') throw new HttpError(403, 'Only a Super Admin can view Admin leave requests')
     const whereClauses: string[] = []
     const params: (string | number | boolean | null)[] = []
 
-    if (filters?.leaveTypeId) {
-      whereClauses.push('L.LEAVE_TYPE_ID = ?')
-      params.push(Number(filters.leaveTypeId))
+    whereClauses.push('E.USER_ID <> ?')
+    params.push(userId)
+    const normalizedApplicantRole = "REGEXP_REPLACE(UPPER(TRIM(U.ROLE)), '[[:space:]-]+', '_')"
+    if (scope === 'admin') {
+      whereClauses.push(`${normalizedApplicantRole} IN ('ADMIN', 'SUPER_ADMIN')`)
+    } else {
+      whereClauses.push(`${normalizedApplicantRole} NOT IN ('ADMIN', 'SUPER_ADMIN')`)
     }
-
-    if (filters?.status && filters.status !== 'ALL') {
-      whereClauses.push('L.STATUS = ?')
-      params.push(filters.status.toUpperCase())
-    }
-
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
-
-    const sortOrder = filters?.sortOrder === 'ASC' ? 'ASC' : 'DESC'
-    let orderClause = 'ORDER BY L.CREATED_AT DESC'
-    if (filters?.sortBy === 'leave_type') {
-      orderClause = `ORDER BY COALESCE(T.NAME, 'Not specified') ${sortOrder}`
-    } else if (filters?.sortBy === 'employee') {
-      orderClause = `ORDER BY U.FULL_NAME ${sortOrder}`
-    } else if (filters?.sortBy === 'start_date') {
-      orderClause = `ORDER BY L.START_DATE ${sortOrder}`
-    } else if (filters?.sortBy === 'days_count') {
-      orderClause = `ORDER BY COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) ${sortOrder}`
-    } else if (filters?.sortBy === 'status') {
-      orderClause = `ORDER BY L.STATUS ${sortOrder}`
-    }
-
-    const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
-              L.LEAVE_TYPE_ID,
-              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
-              COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
-              COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
-              COALESCE(T.IS_PAID, TRUE) AS IS_PAID,
-              T.YEARLY_QUOTA,
-              COALESCE(T.REQUIRES_DOCUMENT, FALSE) AS REQUIRES_DOCUMENT,
-              L.START_DATE, L.END_DATE,
-              COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
-              L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
-              L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT,
-              COALESCE(B.TOTAL, 0) AS QUOTA_TOTAL,
-              COALESCE(B.USED, 0) AS QUOTA_USED,
-              COALESCE(B.PENDING, 0) AS QUOTA_PENDING,
-              (COALESCE(B.TOTAL, 0) - COALESCE(B.USED, 0) - COALESCE(B.PENDING, 0)) AS REMAINING_BALANCE
-       FROM LEAVE_REQUESTS L
-       JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
-       JOIN USERS U ON U.ID = E.USER_ID
-       LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
-       LEFT JOIN LEAVE_BALANCES B ON B.EMPLOYEE_ID = L.EMPLOYEE_ID AND B.LEAVE_TYPE_ID = L.LEAVE_TYPE_ID AND B.YEAR = YEAR(L.START_DATE)
-       ${whereSql}
-       ${orderClause}`,
-      params
-    )
-    return rows.map(toApiRow)
-  },
-
-  async listForManager(userId: number, filters?: LeaveListFilters): Promise<Record<string, unknown>[]> {
-    const whereClauses: string[] = ['M.USER_ID = ?']
-    const params: (string | number | boolean | null)[] = [userId]
 
     if (filters?.leaveTypeId) {
       whereClauses.push('L.LEAVE_TYPE_ID = ?')
@@ -285,7 +272,7 @@ export const leaveService = {
     }
 
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
+      `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID AS REQUESTER_USER_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               L.LEAVE_TYPE_ID,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
@@ -296,7 +283,10 @@ export const leaveService = {
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
-              L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT,
+              L.REASON, L.STATUS, L.APPROVED_BY, A.FULL_NAME AS APPROVER_NAME,
+              COALESCE(L.DECIDED_AT, L.APPROVED_AT) AS DECIDED_AT,
+              COALESCE(L.DECISION_NOTE, L.REJECTION_REASON) AS DECISION_NOTE,
+              L.AUTO_APPROVED, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT,
               COALESCE(B.TOTAL, 0) AS QUOTA_TOTAL,
               COALESCE(B.USED, 0) AS QUOTA_USED,
               COALESCE(B.PENDING, 0) AS QUOTA_PENDING,
@@ -304,8 +294,8 @@ export const leaveService = {
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
        JOIN USERS U ON U.ID = E.USER_ID
+      LEFT JOIN USERS A ON A.ID = L.APPROVED_BY
        LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
-       JOIN EMPLOYEES M ON M.ID = E.MANAGER_ID
        LEFT JOIN LEAVE_BALANCES B ON B.EMPLOYEE_ID = L.EMPLOYEE_ID AND B.LEAVE_TYPE_ID = L.LEAVE_TYPE_ID AND B.YEAR = YEAR(L.START_DATE)
        ${whereSql}
        ${orderClause}`,
@@ -316,17 +306,21 @@ export const leaveService = {
 
   async getVisible(id: number, userId: number, role: string): Promise<Record<string, unknown>> {
     const rows = await executeQuery<DbRow>(
-            `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID, M.USER_ID AS MANAGER_USER_ID,
-              U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
+            `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID AS REQUESTER_USER_ID, M.USER_ID AS MANAGER_USER_ID,
+              U.FULL_NAME, U.EMAIL, U.AVATAR_URL, U.ROLE AS USER_ROLE,
               L.LEAVE_TYPE_ID, T.NAME AS LEAVE_TYPE, T.CODE AS LEAVE_TYPE_CODE,
               T.IS_PAID, T.YEARLY_QUOTA,
               L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               L.TOTAL_DAYS, L.HALF_DAY_SESSION, L.DOCUMENT_URL,
-              L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
+              L.REASON, L.STATUS, L.APPROVED_BY, A.FULL_NAME AS APPROVER_NAME,
+              COALESCE(L.DECIDED_AT, L.APPROVED_AT) AS DECIDED_AT,
+              COALESCE(L.DECISION_NOTE, L.REJECTION_REASON) AS DECISION_NOTE,
+              L.AUTO_APPROVED, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
       JOIN USERS U ON U.ID = E.USER_ID
+        LEFT JOIN USERS A ON A.ID = L.APPROVED_BY
        JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        LEFT JOIN EMPLOYEES M ON M.ID = E.MANAGER_ID
        WHERE L.ID = ?`,
@@ -334,41 +328,66 @@ export const leaveService = {
     )
     const row = rows[0]
     if (!row) throw new HttpError(404, 'Leave request not found')
-    const privileged = ['ADMIN', 'HR'].includes(role)
-    const managerCanView = role === 'MANAGER' && Number(row.MANAGER_USER_ID) === userId
-    if (!privileged && !managerCanView && Number(row.USER_ID) !== userId) throw new HttpError(403, 'Forbidden')
+    const ownRequest = Number(row.REQUESTER_USER_ID) === userId
+    const normalizedRole = normalizeRole(role)
+    const applicantRole = normalizeRole(String(row.USER_ROLE || 'EMPLOYEE'))
+    const privilegedCanView = normalizedRole === 'SUPER_ADMIN'
+      || (normalizedRole === 'ADMIN' && !['ADMIN', 'SUPER_ADMIN'].includes(applicantRole))
+    if (!ownRequest && !privilegedCanView) throw new HttpError(403, 'Forbidden')
     return toApiRow(row)
   },
 
-  async decide(id: number, approverUserId: number, status: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
+  async decide(
+    id: number,
+    approverUserId: number,
+    approverRole: string,
+    status: 'APPROVED' | 'REJECTED',
+    reason?: string,
+    requestId?: string,
+  ): Promise<Record<string, unknown>> {
     const rows = await executeQuery<DbRow>(
       `SELECT L.ID, L.STATUS, L.EMPLOYEE_ID, L.LEAVE_TYPE_ID, L.START_DATE, L.END_DATE,
               COALESCE(L.DAYS_COUNT, L.TOTAL_DAYS) AS DAYS_COUNT,
               T.NAME AS LEAVE_TYPE_NAME,
-              E.USER_ID, E.MANAGER_ID, M.USER_ID AS MANAGER_USER_ID
+              E.USER_ID, U.ROLE AS APPLICANT_ROLE
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
+       JOIN USERS U ON U.ID = E.USER_ID
        JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
-       LEFT JOIN EMPLOYEES M ON M.ID = E.MANAGER_ID
        WHERE L.ID = ?`,
       [id]
     )
     if (!rows[0]) throw new HttpError(404, 'Leave request not found')
     if (Number(rows[0].USER_ID) === approverUserId) throw new HttpError(403, 'You cannot approve your own leave')
-    if (rows[0].STATUS !== 'PENDING') throw new HttpError(409, 'Leave request is not pending')
 
-    const actor = await executeQuery<DbRow>('SELECT ROLE, FULL_NAME FROM USERS WHERE ID = ?', [approverUserId])
-    const role = String(actor[0]?.ROLE ?? '')
-    const approverName = String(actor[0]?.FULL_NAME ?? 'Administrator')
-    if (!['ADMIN', 'HR'].includes(role) && Number(rows[0].MANAGER_USER_ID) !== approverUserId) throw new HttpError(403, 'Forbidden')
+    const currentStatus = String(rows[0].STATUS || '')
+    if (currentStatus !== 'PENDING') {
+      logger.warn('[LEAVE_DECISION_ALREADY_DECIDED]', {
+        requestId,
+        leaveId: id,
+        approverUserId,
+        currentStatus,
+      })
+      throw new HttpError(409, 'Leave request has already been decided', { currentStatus })
+    }
 
-    // Update leave request row
-    await executeUpdate(
-      `UPDATE LEAVE_REQUESTS
-       SET STATUS = ?, APPROVED_BY = ?, APPROVED_AT = CURRENT_TIMESTAMP(), REJECTION_REASON = ?, UPDATED_AT = CURRENT_TIMESTAMP()
-       WHERE ID = ?`,
-      [status, approverUserId, reason ?? null, id]
-    )
+    const applicantRole = normalizeRole(String(rows[0].APPLICANT_ROLE || 'EMPLOYEE'))
+    const actingRole = normalizeRole(approverRole)
+    const allowed = applicantRole === 'SUPER_ADMIN'
+      ? actingRole === 'SUPER_ADMIN'
+      : applicantRole === 'ADMIN'
+        ? actingRole === 'SUPER_ADMIN'
+        : ['ADMIN', 'SUPER_ADMIN'].includes(actingRole)
+    if (!allowed) {
+      throw new HttpError(403, applicantRole === 'ADMIN'
+        ? 'Only a Super Admin can decide an Admin leave request'
+        : applicantRole === 'SUPER_ADMIN'
+          ? 'Only another Super Admin can decide a Super Admin leave request'
+          : 'Only an Admin or Super Admin can decide an employee leave request')
+    }
+
+    const approverRows = await executeQuery<DbRow>(`SELECT FULL_NAME FROM ${usersTable} WHERE ID = ?`, [approverUserId])
+    const approverName = String(approverRows[0]?.FULL_NAME ?? 'Administrator')
 
     const employeeId = Number(rows[0].EMPLOYEE_ID)
     const leaveTypeId = Number(rows[0].LEAVE_TYPE_ID)
@@ -377,42 +396,80 @@ export const leaveService = {
     const startDate = String(rows[0].START_DATE || '').split('T')[0]
     const endDate = String(rows[0].END_DATE || '').split('T')[0]
     const leaveYear = parseInt(startDate.split('-')[0], 10) || new Date().getFullYear()
-
-    // Update leave balances atomically
-    if (status === 'APPROVED') {
-      await leaveBalanceService.approveLeave(employeeId, leaveTypeId, daysCount, leaveYear)
-    } else {
-      await leaveBalanceService.releasePending(employeeId, leaveTypeId, daysCount, leaveYear)
-    }
-
-    // Notify employee of approval or rejection with leave type
     const employeeUserId = Number(rows[0].USER_ID)
     const dateRange = startDate && endDate ? (startDate === endDate ? startDate : `${startDate} to ${endDate}`) : 'your requested dates'
 
-    if (status === 'APPROVED') {
-      await notificationService.createNotification({
-        userId: employeeUserId,
-        type: 'LEAVE_APPROVED',
-        title: 'Leave Request Approved',
-        message: `Your ${leaveTypeName} request (${dateRange}) was approved by ${approverName}`,
-        link: '/dashboard?view=leaves',
-        relatedId: id,
-      }).catch((err) => {
-        console.error(`Failed to notify employee ${employeeUserId} of approval:`, err)
-      })
-    } else {
-      const reasonPart = reason ? `: ${reason}` : ''
-      await notificationService.createNotification({
-        userId: employeeUserId,
-        type: 'LEAVE_REJECTED',
-        title: 'Leave Request Rejected',
-        message: `Your ${leaveTypeName} request (${dateRange}) was rejected${reasonPart}`,
-        link: '/dashboard?view=leaves',
-        relatedId: id,
-      }).catch((err) => {
-        console.error(`Failed to notify employee ${employeeUserId} of rejection:`, err)
-      })
+    await withTransaction(async () => {
+      const updated = await executeUpdate(
+        `UPDATE LEAVE_REQUESTS
+         SET STATUS = ?, APPROVED_BY = ?, APPROVED_AT = CURRENT_TIMESTAMP(), DECIDED_AT = CURRENT_TIMESTAMP(),
+             DECISION_NOTE = ?, REJECTION_REASON = ?, AUTO_APPROVED = FALSE, UPDATED_AT = CURRENT_TIMESTAMP()
+         WHERE ID = ? AND STATUS = 'PENDING'`,
+        [status, approverUserId, reason ?? null, status === 'REJECTED' ? reason ?? null : null, id]
+      )
+      if (updated !== 1) {
+        const recheck = await executeQuery<DbRow>(`SELECT STATUS FROM LEAVE_REQUESTS WHERE ID = ?`, [id])
+        const latestStatus = String(recheck[0]?.STATUS || 'UNKNOWN')
+        throw new HttpError(409, 'Leave request has already been decided', { currentStatus: latestStatus })
+      }
+
+      // Update leave balances atomically
+      if (status === 'APPROVED') {
+        await leaveBalanceService.approveLeave(employeeId, leaveTypeId, daysCount, leaveYear)
+      } else {
+        await leaveBalanceService.releasePending(employeeId, leaveTypeId, daysCount, leaveYear)
+      }
+
+      // Create notification row atomically
+      if (status === 'APPROVED') {
+        await notificationService.createNotification({
+          userId: employeeUserId,
+          type: 'LEAVE_APPROVED',
+          title: 'Leave Request Approved',
+          message: `Your ${leaveTypeName} request (${dateRange}) was approved by ${approverName}`,
+          link: '/dashboard?view=leaves',
+          relatedId: id,
+        })
+      } else {
+        const reasonPart = reason ? `: ${reason}` : ''
+        await notificationService.createNotification({
+          userId: employeeUserId,
+          type: 'LEAVE_REJECTED',
+          title: 'Leave Request Rejected',
+          message: `Your ${leaveTypeName} request (${dateRange}) was rejected by ${approverName}${reasonPart}`,
+          link: '/dashboard?view=leaves',
+          relatedId: id,
+        })
+      }
+    })
+
+    const updatedRecord = await this.getVisible(id, approverUserId, approverRole)
+    return updatedRecord
+  },
+
+  async getBadgeCount(userId: number, role: string): Promise<number> {
+    let actionableCount = 0
+    const normalizedRole = normalizeRole(role)
+    if (['ADMIN', 'SUPER_ADMIN'].includes(normalizedRole)) {
+      const normalizedApplicantRole = "REGEXP_REPLACE(UPPER(TRIM(U.ROLE)), '[[:space:]-]+', '_')"
+      const actionable = await executeQuery<DbRow>(
+        `SELECT COUNT(*) AS CNT
+         FROM ${leaveRequestsTable} L
+         JOIN ${employeesTable} E ON E.ID = L.EMPLOYEE_ID
+         JOIN ${usersTable} U ON U.ID = E.USER_ID
+         WHERE L.STATUS = 'PENDING' AND E.USER_ID <> ?
+           AND ((? = 'ADMIN' AND ${normalizedApplicantRole} NOT IN ('ADMIN', 'SUPER_ADMIN'))
+             OR (? = 'SUPER_ADMIN' AND ${normalizedApplicantRole} IN ('ADMIN', 'SUPER_ADMIN')))`,
+        [userId, normalizedRole, normalizedRole],
+      )
+      actionableCount = Number(actionable[0]?.CNT || 0)
     }
+    const decisions = await executeQuery<DbRow>(
+      `SELECT COUNT(*) AS CNT FROM ${notificationsTable}
+       WHERE USER_ID = ? AND IS_READ = FALSE AND TYPE IN ('LEAVE_APPROVED', 'LEAVE_REJECTED')`,
+      [userId],
+    )
+    return actionableCount + Number(decisions[0]?.CNT || 0)
   },
 
   async cancel(id: number, userId: number): Promise<void> {

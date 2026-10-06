@@ -2,6 +2,7 @@ import { executeDelete, executeInsert, executeQuery, executeUpdate } from '../co
 import { HttpError } from '../utils/http-error'
 import { DbRow, toApiRow } from '../utils/rows'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
+import { assertNotLastActiveSuperAdmin } from '../utils/super-admin-safeguards'
 
 const employeesTable = snowflakeTable('EMPLOYEES')
 const usersTable = snowflakeTable('USERS')
@@ -253,6 +254,7 @@ export const employeeService = {
     return toApiRow(createdRows[0])
   },
   async update(id: number, input: Partial<EmployeeInput>): Promise<void> {
+    if (input.status === 'INACTIVE') await assertNotLastActiveSuperAdminForEmployee(id, 'deactivate')
     const { columns, values } = inputBinds(input)
     if (!columns.length) throw new HttpError(422, 'No employee fields provided')
     await executeUpdate(
@@ -261,6 +263,17 @@ export const employeeService = {
     )
   },
   async remove(id: number): Promise<void> {
+    await assertNotLastActiveSuperAdminForEmployee(id, 'remove')
     await executeDelete(`DELETE FROM ${employeesTable} WHERE ID = ?`, [id])
   },
+}
+
+async function assertNotLastActiveSuperAdminForEmployee(id: number, action: 'deactivate' | 'remove'): Promise<void> {
+  const rows = await executeQuery<DbRow>(
+    `SELECT U.ID, U.ROLE FROM ${employeesTable} E JOIN ${usersTable} U ON U.ID = E.USER_ID WHERE E.ID = ?`,
+    [id],
+  )
+  if (String(rows[0]?.ROLE || '').toUpperCase() === 'SUPER_ADMIN') {
+    await assertNotLastActiveSuperAdmin(Number(rows[0].ID), action)
+  }
 }

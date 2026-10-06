@@ -6,6 +6,7 @@ import { logger } from '../utils/logger'
 import { comparePassword, hashPassword } from '../utils/password'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
 import { sendPasswordResetEmail } from './email.service'
+import { normalizeRole } from '../utils/roles'
 
 const usersTable = snowflakeTable('USERS')
 const employeesTable = snowflakeTable('EMPLOYEES')
@@ -77,11 +78,12 @@ async function findUserByEmail(email: string): Promise<UserRow | undefined> {
 }
 
 function toSafeUser(user: UserRow): AuthenticatedUser {
+  const normalizedRole = normalizeRole(user.ROLE)
   const safe: AuthenticatedUser = {
     id: Number(user.ID),
     fullName: user.FULL_NAME,
     email: user.EMAIL,
-    role: user.ROLE === 'USER' ? 'EMPLOYEE' : user.ROLE,
+    role: normalizedRole === 'USER' ? 'EMPLOYEE' : normalizedRole,
     avatarUrl: user.AVATAR_URL ? String(user.AVATAR_URL) : null,
   }
   return safe

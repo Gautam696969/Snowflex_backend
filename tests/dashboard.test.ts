@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { createToken } from '../src/utils/jwt'
 
@@ -54,15 +55,42 @@ describe('employee dashboard', () => {
     )
   })
 
-  it('keeps database details out of the generic error response', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('exposes database details in development diagnostics', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     executeQueryMock.mockRejectedValueOnce(new Error('private database detail'))
 
     await request(app)
       .get('/api/dashboard/employee')
       .set('Authorization', `Bearer ${token}`)
-      .expect(500, { success: false, message: 'Internal server error', error: null })
+      .expect(500, { success: false, message: 'Internal server error', error: 'private database detail' })
 
     log.mockRestore()
+  })
+})
+
+describe('Super Admin dashboard access', () => {
+  it('allows a display-form Super Admin JWT to access the admin dashboard endpoint', async () => {
+    const token = jwt.sign(
+      { id: 12, email: 'super-admin@example.com', role: 'SUPER ADMIN' },
+      process.env.JWT_SECRET!,
+      { expiresIn: '1h' },
+    )
+    executeQueryMock.mockResolvedValueOnce([{
+      TOTAL_EMPLOYEES: 4,
+      ACTIVE_EMPLOYEES: 4,
+      PRESENT_TODAY: 3,
+      ABSENT_TODAY: 1,
+      LATE_TODAY: 0,
+      PENDING_LEAVES: 0,
+      PENDING_TASKS: 0,
+    }])
+
+    const response = await request(app)
+      .get('/api/dashboard/admin')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    expect(response.body.success).toBe(true)
+    expect(executeQueryMock).toHaveBeenCalledOnce()
   })
 })

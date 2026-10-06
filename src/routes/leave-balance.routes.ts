@@ -15,7 +15,7 @@ leaveBalanceRouter.use(requireAuth)
 leaveBalanceRouter.get('/me', leaveBalanceController.mine)
 leaveBalanceRouter.get(
   '/employee/:employeeId',
-  authorizeRoles('ADMIN', 'HR', 'MANAGER'),
+  authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR', 'MANAGER'),
   validateParams(employeeParamsSchema),
   leaveBalanceController.forEmployee
 )
