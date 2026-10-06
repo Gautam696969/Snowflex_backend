@@ -45,7 +45,7 @@ export interface UpdateProfileInput {
   status?: string
 }
 
-function detectImageType(buffer: Buffer): { ext: string; mime: string } | null {
+function detectImageType(buffer: Buffer, originalFilename?: string): { ext: string; mime: string } {
   if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
     return { ext: 'jpg', mime: 'image/jpeg' }
   }
@@ -54,12 +54,43 @@ function detectImageType(buffer: Buffer): { ext: string; mime: string } | null {
       buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
     return { ext: 'png', mime: 'image/png' }
   }
+  if (buffer.length >= 6 &&
+      (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')) {
+    return { ext: 'gif', mime: 'image/gif' }
+  }
   if (buffer.length >= 12 &&
       buffer.toString('ascii', 0, 4) === 'RIFF' &&
       buffer.toString('ascii', 8, 12) === 'WEBP') {
     return { ext: 'webp', mime: 'image/webp' }
   }
-  return null
+  if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4D) {
+    return { ext: 'bmp', mime: 'image/bmp' }
+  }
+  if (buffer.length >= 4 && buffer[0] === 0x00 && buffer[1] === 0x00 && (buffer[2] === 0x01 || buffer[2] === 0x02) && buffer[3] === 0x00) {
+    return { ext: 'ico', mime: 'image/x-icon' }
+  }
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+    const brand = buffer.toString('ascii', 8, 12)
+    if (brand === 'avif' || brand === 'avis') return { ext: 'avif', mime: 'image/avif' }
+    if (brand === 'heic' || brand === 'heix' || brand === 'mif1') return { ext: 'heic', mime: 'image/heic' }
+  }
+
+  const sample = buffer.slice(0, 500).toString('utf8').trim()
+  if (sample.includes('<svg') || sample.startsWith('<?xml')) {
+    return { ext: 'svg', mime: 'image/svg+xml' }
+  }
+
+  if (originalFilename) {
+    const extMatch = originalFilename.match(/\.([a-zA-Z0-9]+)$/)
+    if (extMatch) {
+      const ext = extMatch[1].toLowerCase().replace(/[^a-z0-9]/g, '')
+      if (ext) {
+        return { ext, mime: `image/${ext}` }
+      }
+    }
+  }
+
+  return { ext: 'png', mime: 'image/png' }
 }
 
 export const userService = {
@@ -238,15 +269,12 @@ export const userService = {
     return this.getProfile(userId)
   },
 
-  async updateAvatar(userId: number, fileBuffer: Buffer, _originalFilename: string): Promise<string> {
-    if (fileBuffer.length > 2 * 1024 * 1024) {
-      throw new HttpError(400, 'Image file size must not exceed 2 MB')
+  async updateAvatar(userId: number, fileBuffer: Buffer, originalFilename: string): Promise<string> {
+    if (fileBuffer.length > 10 * 1024 * 1024) {
+      throw new HttpError(400, 'Image file size must not exceed 10 MB')
     }
 
-    const detected = detectImageType(fileBuffer)
-    if (!detected) {
-      throw new HttpError(400, 'Invalid image format. Only JPEG, PNG, and WebP images are allowed.')
-    }
+    const detected = detectImageType(fileBuffer, originalFilename)
 
     const uploadDir = path.resolve(process.cwd(), 'uploads', 'avatars')
     if (!fs.existsSync(uploadDir)) {
@@ -256,55 +284,59 @@ export const userService = {
     const filename = `avatar-${userId}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${detected.ext}`
     const targetPath = path.join(uploadDir, filename)
 
-    // Delete previous avatar file if exists
+    let oldUrl: unknown
     try {
       const existing = await executeQuery<{ AVATAR_URL: string }>(
         `SELECT AVATAR_URL FROM ${usersTable} WHERE ID = ?`,
         [userId],
       )
-      const oldUrl = existing[0]?.AVATAR_URL
-      if (oldUrl && typeof oldUrl === 'string' && oldUrl.startsWith('/uploads/avatars/')) {
-        const oldFile = path.resolve(process.cwd(), oldUrl.replace(/^\//, ''))
-        if (fs.existsSync(oldFile)) {
-          await fs.promises.unlink(oldFile).catch(() => {})
-        }
-      }
+      oldUrl = existing[0]?.AVATAR_URL
     } catch {
-      // Continue even if old avatar deletion fails
+      // Continue if the previous URL cannot be read.
     }
 
     await fs.promises.writeFile(targetPath, fileBuffer)
     const avatarUrl = `/uploads/avatars/${filename}`
 
-    await executeQuery(
-      `UPDATE ${usersTable} SET AVATAR_URL = ?, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = ?`,
-      [avatarUrl, userId],
-    )
+    try {
+      await executeQuery(
+        `UPDATE ${usersTable} SET AVATAR_URL = ?, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = ?`,
+        [avatarUrl, userId],
+      )
+    } catch (error) {
+      await fs.promises.unlink(targetPath).catch(() => {})
+      throw error
+    }
+
+    if (typeof oldUrl === 'string' && oldUrl.startsWith('/uploads/avatars/')) {
+      const oldFile = path.resolve(process.cwd(), oldUrl.replace(/^\//, ''))
+      if (oldFile !== targetPath) await fs.promises.unlink(oldFile).catch(() => {})
+    }
 
     return avatarUrl
   },
 
   async removeAvatar(userId: number): Promise<void> {
+    let oldUrl: unknown
     try {
       const existing = await executeQuery<{ AVATAR_URL: string }>(
         `SELECT AVATAR_URL FROM ${usersTable} WHERE ID = ?`,
         [userId],
       )
-      const oldUrl = existing[0]?.AVATAR_URL
-      if (oldUrl && typeof oldUrl === 'string' && oldUrl.startsWith('/uploads/avatars/')) {
-        const oldFile = path.resolve(process.cwd(), oldUrl.replace(/^\//, ''))
-        if (fs.existsSync(oldFile)) {
-          await fs.promises.unlink(oldFile).catch(() => {})
-        }
-      }
+      oldUrl = existing[0]?.AVATAR_URL
     } catch {
-      // Continue even if disk unlink fails
+      // Continue if the previous URL cannot be read.
     }
 
     await executeQuery(
       `UPDATE ${usersTable} SET AVATAR_URL = NULL, UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = ?`,
       [userId],
     )
+
+    if (typeof oldUrl === 'string' && oldUrl.startsWith('/uploads/avatars/')) {
+      const oldFile = path.resolve(process.cwd(), oldUrl.replace(/^\//, ''))
+      await fs.promises.unlink(oldFile).catch(() => {})
+    }
   },
 
   async changePassword(userId: number, currentPassword: string | undefined, newPassword: string): Promise<void> {

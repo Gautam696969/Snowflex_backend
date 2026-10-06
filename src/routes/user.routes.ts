@@ -10,14 +10,15 @@ import { HttpError } from '../utils/http-error'
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 2 * 1024 * 1024, // 2 MB limit
+    fileSize: 10 * 1024 * 1024, // 10 MB limit for high-res images
   },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
-    if (allowed.includes(file.mimetype.toLowerCase())) {
+    const isImageMime = file.mimetype.startsWith('image/')
+    const isImageExt = /\.(jpe?g|png|webp|gif|svg|bmp|avif|heic|heif|tiff?|ico|jfif)$/i.test(file.originalname)
+    if (isImageMime || isImageExt) {
       cb(null, true)
     } else {
-      cb(new HttpError(400, 'Invalid file type. Allowed formats: JPG, PNG, WebP.'))
+      cb(new HttpError(400, 'Invalid file type. Please upload an image file.'))
     }
   },
 })

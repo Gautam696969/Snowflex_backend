@@ -28,13 +28,25 @@ beforeEach(() => {
 describe('GET /api/attendance/me', () => {
   const token = createToken({ id: 29, email: 'employee@example.com', role: 'EMPLOYEE' })
 
-  it('queries attendance by the authenticated USERS ID without looking up EMPLOYEES', async () => {
-    executeQueryMock.mockResolvedValueOnce([{
-      ID: 4,
-      EMPLOYEE_ID: 29,
-      ATTENDANCE_DATE: '2026-09-29',
-      STATUS: 'PRESENT',
-    }])
+  it('resolves the employee record and returns the user avatar with attendance', async () => {
+    executeQueryMock
+      .mockResolvedValueOnce([{ ID: 4 }])
+      .mockResolvedValueOnce([{
+        ID: 4,
+        USER_ID: 29,
+        FULL_NAME: 'Employee User',
+        EMAIL: 'employee@example.com',
+        AVATAR_URL: '/uploads/avatars/employee.webp',
+      }])
+      .mockResolvedValueOnce([{
+        ID: 8,
+        EMPLOYEE_ID: 4,
+        FULL_NAME: 'Employee User',
+        EMAIL: 'employee@example.com',
+        AVATAR_URL: '/uploads/avatars/employee.webp',
+        ATTENDANCE_DATE: '2026-09-29',
+        STATUS: 'PRESENT',
+      }])
 
     const response = await request(app)
       .get('/api/attendance/me')
@@ -42,10 +54,12 @@ describe('GET /api/attendance/me', () => {
       .expect(200)
 
     expect(response.body.data).toHaveLength(1)
-    expect(executeQueryMock).toHaveBeenCalledTimes(1)
-    expect(executeQueryMock.mock.calls[0][0]).toContain('FROM ATTENDANCE WHERE EMPLOYEE_ID = ?')
+    expect(response.body.data[0].avatarUrl).toBe('/uploads/avatars/employee.webp')
+    expect(executeQueryMock).toHaveBeenCalledTimes(3)
+    expect(executeQueryMock.mock.calls[0][0]).toContain('WHERE USER_ID = ?')
     expect(executeQueryMock.mock.calls[0][1]).toEqual([29])
-    expect(String(executeQueryMock.mock.calls[0][0])).not.toContain('EMPLOYEES')
+    expect(executeQueryMock.mock.calls[2][0]).toContain('U.AVATAR_URL')
+    expect(executeQueryMock.mock.calls[2][1]).toEqual([4])
   })
 
   it('keeps the generic error response if the attendance query fails', async () => {

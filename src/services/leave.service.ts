@@ -173,7 +173,7 @@ export const leaveService = {
 
   async listForUser(userId: number): Promise<Record<string, unknown>[]> {
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, L.LEAVE_TYPE_ID,
+      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL, L.LEAVE_TYPE_ID,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
               COALESCE(T.CODE, 'OTHER') AS LEAVE_TYPE_CODE,
@@ -186,6 +186,7 @@ export const leaveService = {
               L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
+      JOIN USERS U ON U.ID = E.USER_ID
        LEFT JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        WHERE E.USER_ID = ?
        ORDER BY L.CREATED_AT DESC`,
@@ -225,7 +226,7 @@ export const leaveService = {
     }
 
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL,
+      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               L.LEAVE_TYPE_ID,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
@@ -284,7 +285,7 @@ export const leaveService = {
     }
 
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL,
+      `SELECT L.ID, L.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               L.LEAVE_TYPE_ID,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE,
               COALESCE(T.NAME, 'Not specified') AS LEAVE_TYPE_NAME,
@@ -315,7 +316,8 @@ export const leaveService = {
 
   async getVisible(id: number, userId: number, role: string): Promise<Record<string, unknown>> {
     const rows = await executeQuery<DbRow>(
-      `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID, M.USER_ID AS MANAGER_USER_ID,
+            `SELECT L.ID, L.EMPLOYEE_ID, E.USER_ID, M.USER_ID AS MANAGER_USER_ID,
+              U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               L.LEAVE_TYPE_ID, T.NAME AS LEAVE_TYPE, T.CODE AS LEAVE_TYPE_CODE,
               T.IS_PAID, T.YEARLY_QUOTA,
               L.START_DATE, L.END_DATE,
@@ -324,6 +326,7 @@ export const leaveService = {
               L.REASON, L.STATUS, L.APPROVED_BY, L.APPROVED_AT, L.REJECTION_REASON, L.CREATED_AT
        FROM LEAVE_REQUESTS L
        JOIN EMPLOYEES E ON E.ID = L.EMPLOYEE_ID
+      JOIN USERS U ON U.ID = E.USER_ID
        JOIN LEAVE_TYPES T ON T.ID = L.LEAVE_TYPE_ID
        LEFT JOIN EMPLOYEES M ON M.ID = E.MANAGER_ID
        WHERE L.ID = ?`,

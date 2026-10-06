@@ -71,6 +71,7 @@ export const employeeService = {
       SELECT E.ID, E.USER_ID,
              COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
              COALESCE(U.EMAIL, '—') AS EMAIL,
+              U.AVATAR_URL,
              E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
              D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS,
              COALESCE(PS.PENDING_COUNT, 0) AS PENDING_LEAVE_COUNT,
@@ -97,6 +98,7 @@ export const employeeService = {
       `SELECT E.ID, E.USER_ID,
               COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
               COALESCE(U.EMAIL, '—') AS EMAIL,
+              U.AVATAR_URL,
               E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
               D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS,
               E.CREATED_AT, E.UPDATED_AT
@@ -120,6 +122,7 @@ export const employeeService = {
       `SELECT E.ID, E.USER_ID,
               COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
               COALESCE(U.EMAIL, '—') AS EMAIL,
+              U.AVATAR_URL,
               E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
               D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS
        FROM ${employeesTable} E
@@ -233,6 +236,7 @@ export const employeeService = {
       `SELECT E.ID, E.USER_ID,
               COALESCE(U.FULL_NAME, 'Employee #' || E.ID::VARCHAR) AS FULL_NAME,
               COALESCE(U.EMAIL, '—') AS EMAIL,
+              U.AVATAR_URL,
               E.EMPLOYEE_CODE, E.PHONE, E.DEPARTMENT_ID,
               D.NAME AS DEPARTMENT_NAME, E.DESIGNATION, E.JOINING_DATE, E.MANAGER_ID, E.STATUS,
               E.CREATED_AT, E.UPDATED_AT

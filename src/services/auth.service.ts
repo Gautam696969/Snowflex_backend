@@ -70,7 +70,7 @@ export interface AuthServiceContract {
 async function findUserByEmail(email: string): Promise<UserRow | undefined> {
   // Keep user input in binds, never in SQL text.
   const rows = await executeQuery<UserRow>(
-    `SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE FROM ${usersTable} WHERE EMAIL = ?`,
+    `SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM ${usersTable} WHERE EMAIL = ?`,
     [email],
   )
   return rows[0]
@@ -82,9 +82,7 @@ function toSafeUser(user: UserRow): AuthenticatedUser {
     fullName: user.FULL_NAME,
     email: user.EMAIL,
     role: user.ROLE === 'USER' ? 'EMPLOYEE' : user.ROLE,
-  }
-  if (user.AVATAR_URL) {
-    safe.avatarUrl = String(user.AVATAR_URL)
+    avatarUrl: user.AVATAR_URL ? String(user.AVATAR_URL) : null,
   }
   return safe
 }
@@ -127,7 +125,7 @@ export const authService: AuthServiceContract = {
 
   async getUserById(id) {
     const rows = await executeQuery<UserRow>(
-      `SELECT ID, FULL_NAME, EMAIL, ROLE FROM ${usersTable} WHERE ID = ?`,
+      `SELECT ID, FULL_NAME, EMAIL, ROLE, AVATAR_URL FROM ${usersTable} WHERE ID = ?`,
       [id],
     )
     if (!rows[0]) {
@@ -138,7 +136,7 @@ export const authService: AuthServiceContract = {
 
   async listUsers() {
     const rows = await executeQuery<UserRow>(
-      `SELECT ID, FULL_NAME, EMAIL, ROLE FROM ${usersTable} ORDER BY ID`,
+      `SELECT ID, FULL_NAME, EMAIL, ROLE, AVATAR_URL FROM ${usersTable} ORDER BY ID`,
     )
     return rows.map(toSafeUser)
   },
