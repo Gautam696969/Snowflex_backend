@@ -1,6 +1,7 @@
 import { Response } from 'express'
 import { executeInsert, executeQuery, executeUpdate } from '../config/snowflake'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
+import { normalizeRole } from '../utils/roles'
 
 const notificationsTable = snowflakeTable('NOTIFICATIONS')
 const usersTable = snowflakeTable('USERS')
@@ -141,7 +142,7 @@ export const notificationService = {
 
   async notifyAdmins(input: Omit<CreateNotificationInput, 'userId'>): Promise<void> {
     const adminRows = await executeQuery<Record<string, unknown>>(
-      `SELECT ID FROM ${usersTable} WHERE UPPER(ROLE) = 'ADMIN'`,
+      `SELECT ID FROM ${usersTable} WHERE REGEXP_REPLACE(UPPER(TRIM(ROLE)), '[[:space:]-]+', '_') = 'ADMIN'`,
     )
 
     for (const admin of adminRows) {
@@ -154,6 +155,35 @@ export const notificationService = {
           console.error(`Failed to notify admin ${adminId}:`, err)
         })
       }
+    }
+  },
+
+  async notifyLeaveReviewers(
+    applicantRole: string,
+    applicantUserId: number,
+    input: Omit<CreateNotificationInput, 'userId'>,
+  ): Promise<void> {
+    const normalizedRole = normalizeRole(applicantRole)
+    const targetRoles = normalizedRole === 'ADMIN'
+      ? ['SUPER_ADMIN']
+      : normalizedRole === 'SUPER_ADMIN'
+        ? ['SUPER_ADMIN']
+        : ['ADMIN', 'SUPER_ADMIN']
+    const placeholders = targetRoles.map(() => '?').join(', ')
+    const users = await executeQuery<Record<string, unknown>>(
+      `SELECT U.ID FROM ${usersTable} U
+       LEFT JOIN EMPLOYEES E ON E.USER_ID = U.ID
+      WHERE REGEXP_REPLACE(UPPER(TRIM(U.ROLE)), '[[:space:]-]+', '_') IN (${placeholders}) AND U.ID <> ?
+         AND COALESCE(E.STATUS, 'ACTIVE') = 'ACTIVE'`,
+      [...targetRoles, applicantUserId],
+    )
+
+    for (const user of users) {
+      const userId = Number(user.ID)
+      if (!userId) continue
+      await this.createNotification({ userId, ...input }).catch((error) => {
+        console.error(`Failed to notify leave reviewer ${userId}:`, error)
+      })
     }
   },
 

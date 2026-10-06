@@ -5,6 +5,8 @@ import { executeQuery } from '../config/snowflake'
 import { HttpError } from '../utils/http-error'
 import { comparePassword, hashPassword } from '../utils/password'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
+import { assertNotLastActiveSuperAdmin } from '../utils/super-admin-safeguards'
+import { normalizeRole } from '../utils/roles'
 
 const usersTable = snowflakeTable('USERS')
 const employeesTable = snowflakeTable('EMPLOYEES')
@@ -131,7 +133,9 @@ export const userService = {
       id: Number(row.ID),
       fullName: String(row.FULL_NAME || ''),
       email: String(row.EMAIL || ''),
-      role: String(row.ROLE === 'USER' ? 'EMPLOYEE' : row.ROLE || 'EMPLOYEE'),
+      role: normalizeRole(String(row.ROLE || 'EMPLOYEE')) === 'USER'
+        ? 'EMPLOYEE'
+        : normalizeRole(String(row.ROLE || 'EMPLOYEE')),
       avatarUrl: row.AVATAR_URL ? String(row.AVATAR_URL) : null,
       hasPassword: Boolean(row.PASSWORD_HASH),
       employeeId: row.EMPLOYEE_ID ? Number(row.EMPLOYEE_ID) : null,
@@ -150,7 +154,10 @@ export const userService = {
   },
 
   async updateProfile(userId: number, input: UpdateProfileInput, actorRole: string): Promise<UserProfileData> {
-    const isAdmin = actorRole === 'ADMIN'
+    const isAdmin = actorRole === 'ADMIN' || actorRole === 'SUPER_ADMIN'
+    if (isAdmin && input.status === 'INACTIVE') {
+      await assertNotLastActiveSuperAdmin(userId, 'deactivate')
+    }
 
     // 1. Update USERS table if fullName or admin-updated email is present
     const userUpdates: string[] = []

@@ -76,7 +76,7 @@ describe('registration', () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: '', email: 'bad', password: 'short' })
-      .expect(422, { success: false, message: 'Request validation failed', error: null })
+      .expect(400, { success: false, message: 'Request validation failed', error: null })
   })
 
   it('rejects duplicate email addresses', async () => {
@@ -91,11 +91,11 @@ describe('registration', () => {
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'not-an-email', password: 'Password123' })
-      .expect(422, { success: false, message: 'Request validation failed', error: null })
+      .expect(400, { success: false, message: 'Request validation failed', error: null })
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'short' })
-      .expect(422, { success: false, message: 'Request validation failed', error: null })
+      .expect(400, { success: false, message: 'Request validation failed', error: null })
     expect(service.register).not.toHaveBeenCalled()
   })
 })
@@ -180,6 +180,19 @@ describe('admin users route', () => {
     expect(JSON.stringify(response.body)).not.toContain('PASSWORD_HASH')
   })
 
+  it('accepts a display-form Super Admin role in an already-issued JWT', async () => {
+    const legacyToken = jwt.sign(
+      { id: 99, email: 'super-admin@example.com', role: 'SUPER ADMIN' },
+      process.env.JWT_SECRET!,
+      { expiresIn: '1h' },
+    )
+    await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${legacyToken}`)
+      .expect(200)
+    expect(service.listUsers).toHaveBeenCalledOnce()
+  })
+
   it('blocks non-admin users from role governance, system telemetry, and test email', async () => {
     const userToken = createToken({ id: safeUser.id, email: safeUser.email, role: 'USER' })
     await request(app)
@@ -243,7 +256,7 @@ describe('forgot and reset password', () => {
     await request(app)
       .post('/api/auth/forgot-password')
       .send({ email: 'not-an-email' })
-      .expect(422)
+      .expect(400)
     expect(service.forgotPassword).not.toHaveBeenCalled()
   })
 
@@ -263,23 +276,80 @@ describe('forgot and reset password', () => {
     await request(app)
       .post('/api/auth/reset-password')
       .send({ token: '', password: 'short' })
-      .expect(422)
+      .expect(400)
     expect(service.resetPassword).not.toHaveBeenCalled()
   })
 })
 
 describe('database failures', () => {
-  it('returns a generic server error when authentication storage is unavailable', async () => {
+  it('returns the underlying error in development and logs a structured error chain', async () => {
     const log = vi.spyOn(logger, 'error').mockImplementation(() => {})
     vi.mocked(service.register).mockRejectedValueOnce(new Error('provider details must stay private'))
     await request(app)
       .post('/api/auth/register')
       .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
-      .expect(500, { success: false, message: 'Internal server error', error: null })
+      .expect(500, {
+        success: false,
+        message: 'Internal server error',
+        error: 'provider details must stay private',
+      })
     expect(log).toHaveBeenCalledWith('POST /api/auth/register failed', {
-      error: 'provider details must stay private',
-      cause: undefined,
+      errors: [expect.objectContaining({
+        name: 'Error',
+        message: 'provider details must stay private',
+        stack: expect.stringContaining('Error: provider details must stay private'),
+      })],
     })
     log.mockRestore()
+  })
+
+  it('logs Snowflake SQL diagnostics without secret values', async () => {
+    const log = vi.spyOn(logger, 'error').mockImplementation(() => {})
+    const snowflakeError = Object.assign(new Error('invalid identifier'), {
+      code: '000904',
+      sqlState: '42000',
+    })
+    const queryError = Object.assign(new Error('Snowflake query failed', { cause: snowflakeError }), {
+      sqlText: "SELECT ID FROM USERS WHERE TOKEN = 'sensitive-value'",
+    })
+    vi.mocked(service.register).mockRejectedValueOnce(queryError)
+
+    await request(app)
+      .post('/api/auth/register')
+      .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
+      .expect(500, { success: false, message: 'Internal server error', error: 'invalid identifier' })
+
+    expect(log).toHaveBeenCalledWith('POST /api/auth/register failed', {
+      errors: [
+        expect.objectContaining({
+          message: 'Snowflake query failed',
+          sqlText: "SELECT ID FROM USERS WHERE TOKEN = '[REDACTED]'",
+        }),
+        expect.objectContaining({
+          message: 'invalid identifier',
+          code: '000904',
+          sqlState: '42000',
+        }),
+      ],
+    })
+    log.mockRestore()
+  })
+
+  it('keeps the internal error generic in production', async () => {
+    const previousNodeEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    const log = vi.spyOn(logger, 'error').mockImplementation(() => {})
+    vi.mocked(service.register).mockRejectedValueOnce(new Error('private provider detail'))
+
+    try {
+      await request(app)
+        .post('/api/auth/register')
+        .send({ fullName: 'John Doe', email: 'john@example.com', password: 'Password123' })
+        .expect(500, { success: false, message: 'Internal server error', error: null })
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previousNodeEnv
+      log.mockRestore()
+    }
   })
 })

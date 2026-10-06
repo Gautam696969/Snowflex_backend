@@ -76,7 +76,7 @@ describe('user profile endpoints', () => {
       .put('/api/users/me')
       .set('Authorization', `Bearer ${employeeToken}`)
       .send({ fullName: 'A' })
-      .expect(422)
+      .expect(400)
   })
 
   it('POST /api/users/me/avatar rejects uploads without a file', async () => {
@@ -125,7 +125,7 @@ describe('user profile endpoints', () => {
       .post('/api/users/me/change-password')
       .set('Authorization', `Bearer ${employeeToken}`)
       .send({ currentPassword: 'OldPassword123!', newPassword: 'short' })
-      .expect(422)
+      .expect(400)
   })
 
   it('POST /api/users/me/change-password successfully calls changePassword service', async () => {

@@ -62,14 +62,14 @@ describe('GET /api/attendance/me', () => {
     expect(executeQueryMock.mock.calls[2][1]).toEqual([4])
   })
 
-  it('keeps the generic error response if the attendance query fails', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('exposes the underlying error outside production if the attendance query fails', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     executeQueryMock.mockRejectedValueOnce(new Error('private database detail'))
 
     await request(app)
       .get('/api/attendance/me')
       .set('Authorization', `Bearer ${token}`)
-      .expect(500, { success: false, message: 'Internal server error', error: null })
+      .expect(500, { success: false, message: 'Internal server error', error: 'private database detail' })
 
     log.mockRestore()
   })

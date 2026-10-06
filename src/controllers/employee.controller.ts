@@ -3,7 +3,7 @@ import { employeeService } from '../services/employee.service'
 import { HttpError } from '../utils/http-error'
 import { sendSuccess } from '../utils/apiResponse'
 
-const broadRoles = ['ADMIN', 'HR']
+const broadRoles = ['ADMIN', 'SUPER_ADMIN', 'HR']
 
 export const employeeController = {
   async list(request: Request, response: Response, next: NextFunction) {

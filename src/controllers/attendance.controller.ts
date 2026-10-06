@@ -21,7 +21,7 @@ export const attendanceController = {
     try {
       const employeeId = Number(request.params.employeeId)
       const role = request.user!.role
-      if (!['ADMIN', 'HR'].includes(role)) {
+      if (!['ADMIN', 'SUPER_ADMIN', 'HR'].includes(role)) {
         const employee = await employeeService.get(employeeId)
         const own = Number(employee.userId) === request.user!.id
         const team = role === 'MANAGER' && (await employeeService.teamForUser(request.user!.id)).some((item) => Number(item.id) === employeeId)

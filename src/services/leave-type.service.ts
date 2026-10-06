@@ -90,7 +90,7 @@ export const leaveTypeService = {
     const name = input.name.trim()
     const code = input.code.trim().toUpperCase()
     if (!name || !code) {
-      throw new HttpError(422, 'Name and Code are required')
+      throw new HttpError(400, 'Name and Code are required')
     }
 
     // Check duplicate
@@ -130,7 +130,7 @@ export const leaveTypeService = {
 
     if (input.name !== undefined) {
       const name = input.name.trim()
-      if (!name) throw new HttpError(422, 'Name cannot be empty')
+      if (!name) throw new HttpError(400, 'Name cannot be empty')
       const duplicate = await executeQuery<DbRow>(
         `SELECT ID FROM LEAVE_TYPES WHERE UPPER(NAME) = ? AND ID <> ?`,
         [name.toUpperCase(), id]
@@ -142,7 +142,7 @@ export const leaveTypeService = {
 
     if (input.code !== undefined) {
       const code = input.code.trim().toUpperCase()
-      if (!code) throw new HttpError(422, 'Code cannot be empty')
+      if (!code) throw new HttpError(400, 'Code cannot be empty')
       const duplicate = await executeQuery<DbRow>(
         `SELECT ID FROM LEAVE_TYPES WHERE UPPER(CODE) = ? AND ID <> ?`,
         [code, id]

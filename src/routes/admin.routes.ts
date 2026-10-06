@@ -6,7 +6,10 @@ import { validateBody, validateParams } from '../middleware/validation.middlewar
 import { AuthServiceContract } from '../services/auth.service'
 
 const roleSchema = z.object({
-  role: z.enum(['ADMIN', 'HR', 'MANAGER', 'EMPLOYEE']),
+  role: z.string()
+    .trim()
+    .transform((role) => role.toUpperCase().replace(/[\s-]+/g, '_'))
+    .pipe(z.enum(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER', 'EMPLOYEE'])),
 })
 
 const idSchema = z.object({
@@ -21,10 +24,10 @@ export function createAdminRouter(service?: AuthServiceContract): Router {
   const router = Router()
   const controller = createAdminController(service)
 
-  router.get('/users', requireAuth, authorizeRoles('ADMIN', 'HR'), controller.listUsers)
-  router.patch('/users/:id/role', requireAuth, authorizeRoles('ADMIN'), validateParams(idSchema), validateBody(roleSchema), controller.updateUserRole)
-  router.get('/system', requireAuth, authorizeRoles('ADMIN'), controller.getSystemInfo)
-  router.post('/test-email', requireAuth, authorizeRoles('ADMIN'), validateBody(testEmailSchema), controller.testEmail)
+  router.get('/users', requireAuth, authorizeRoles('ADMIN', 'SUPER_ADMIN', 'HR'), controller.listUsers)
+  router.patch('/users/:id/role', requireAuth, authorizeRoles('ADMIN', 'SUPER_ADMIN'), validateParams(idSchema), validateBody(roleSchema), controller.updateUserRole)
+  router.get('/system', requireAuth, authorizeRoles('ADMIN', 'SUPER_ADMIN'), controller.getSystemInfo)
+  router.post('/test-email', requireAuth, authorizeRoles('ADMIN', 'SUPER_ADMIN'), validateBody(testEmailSchema), controller.testEmail)
 
   return router
 }
