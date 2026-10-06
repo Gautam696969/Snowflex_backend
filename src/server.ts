@@ -6,6 +6,10 @@ import { validateGroqConfig } from './config/groq'
 import { logger } from './utils/logger'
 import { verifyMailSetup } from './services/email.service'
 
+import http from 'node:http'
+import { initSocketServer } from './socket/socket.server'
+import { chatService } from './services/chat.service'
+
 async function startServer(): Promise<void> {
   let env: ReturnType<typeof getEnvironment>
   try {
@@ -36,7 +40,15 @@ async function startServer(): Promise<void> {
 
   await verifyMailSetup()
 
-  const server = createApp().listen(env.PORT, () => {
+  await chatService.ensureTables().catch((err) => {
+    logger.warn('Could not ensure chat tables in Snowflake:', err)
+  })
+
+  const app = createApp()
+  const httpServer = http.createServer(app)
+  initSocketServer(httpServer)
+
+  const server = httpServer.listen(env.PORT, () => {
     logger.success(`Server running on port ${env.PORT}`)
   })
 
