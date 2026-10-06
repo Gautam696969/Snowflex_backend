@@ -22,6 +22,7 @@ import { taskRouter } from './routes/task.routes'
 import { dashboardRouter } from './routes/dashboard.routes'
 import { userRouter } from './routes/user.routes'
 import { notificationRouter } from './routes/notification.routes'
+import { chatRouter } from './routes/chat.routes'
 import { isSnowflakeConnected } from './config/snowflake'
 
 function allowedOrigins(): Set<string> {
@@ -102,6 +103,8 @@ export function createApp(service?: AuthServiceContract): Express {
   app.use('/api/dashboard', dashboardRouter)
   app.use('/api/notifications', notificationRouter)
   app.use('/notifications', notificationRouter)
+  app.use('/api/chat', chatRouter)
+  app.use('/chat', chatRouter)
   app.use((_request, response) => {
     response.status(404).json({ success: false, message: 'Not found' })
   })
