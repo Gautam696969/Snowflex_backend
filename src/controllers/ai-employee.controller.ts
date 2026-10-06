@@ -41,8 +41,22 @@ export const aiEmployeeController = {
         source: 'widget',
         message: String(request.body?.message ?? ''),
         history: request.body?.history,
+        requestId: (request.headers['x-request-id'] as string) || undefined,
       })
       sendSuccess(response, 200, 'Message sent successfully', result)
+    } catch (error) { next(error) }
+  },
+
+  async widgetConfirm(request: Request, response: Response, next: NextFunction) {
+    try {
+      const confirmationToken = String(request.body?.confirmationToken || '')
+      const result = await aiEmployeeService.widgetConfirm(
+        request.user!.id,
+        request.user!.role,
+        confirmationToken,
+        (request.headers['x-request-id'] as string) || undefined,
+      )
+      sendSuccess(response, 200, 'Leave request confirmed successfully', result)
     } catch (error) { next(error) }
   },
 

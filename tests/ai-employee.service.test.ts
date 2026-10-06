@@ -15,6 +15,18 @@ vi.mock('../src/config/snowflake', () => ({
 
 vi.mock('../src/config/ai', () => ({ aiClient: { chat: aiChatMock } }))
 
+vi.mock('../src/agent/agent-loop', () => ({
+  runAgentLoop: vi.fn().mockImplementation(async (message: string, history: any[]) => {
+    const aiResult = await aiChatMock([...history, { role: 'user', content: message }])
+    return {
+      reply: aiResult.reply,
+      model: aiResult.model,
+      toolCallsExecuted: 0,
+      confirmation: null,
+    }
+  }),
+}))
+
 import { aiEmployeeService } from '../src/services/ai-employee.service'
 
 let leaveRows: Record<string, unknown>[]
@@ -110,7 +122,8 @@ describe('stateless widget chat', () => {
     ]))
     expect(executeInsertMock).not.toHaveBeenCalled()
     expect(executeUpdateMock).not.toHaveBeenCalled()
-    expect(executeQueryMock).not.toHaveBeenCalled()
+    const conversationQueries = executeQueryMock.mock.calls.filter(([sql]) => String(sql).includes('AI_CONVERSATIONS'))
+    expect(conversationQueries).toHaveLength(0)
   })
 
   it('keeps the live leave-data response available without persistence', async () => {

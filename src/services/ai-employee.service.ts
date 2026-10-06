@@ -4,6 +4,11 @@ import { HttpError } from '../utils/http-error'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
 import { aiClient, AiChatMessage } from '../config/ai'
 import { logger } from '../utils/logger'
+import { runAgentLoop } from '../agent/agent-loop'
+import { confirmationService } from '../agent/confirmation.service'
+import { logAgentToolCall } from '../agent/audit'
+import { LeaveConfirmationPayload } from '../agent/types'
+import { leaveService } from './leave.service'
 
 const conversationsTable = snowflakeTable('AI_CONVERSATIONS')
 const messagesTable = snowflakeTable('AI_MESSAGES')
@@ -239,29 +244,126 @@ export const aiEmployeeService = {
       source: 'widget'
       message: string
       history?: Array<{ role: 'user' | 'assistant'; content: string }>
+      requestId?: string
     },
-  ): Promise<{ message: { id: string; role: 'assistant'; content: string; model: string; createdAt: string } }> {
+  ): Promise<{
+    message: {
+      id: string
+      role: 'assistant'
+      content: string
+      model: string
+      createdAt: string
+      confirmation?: LeaveConfirmationPayload | null
+    }
+  }> {
     const userMessage = payload.message.trim()
     if (!userMessage) throw new HttpError(422, 'Message is required')
 
-    const history: AiChatMessage[] = (payload.history ?? []).slice(-20).map((message) => ({
-      role: message.role,
-      content: message.content,
-    }))
-    const messages: AiChatMessage[] = [
-      { role: 'system', content: buildSystemPrompt(userId, role) },
-      ...history,
-      { role: 'user', content: userMessage },
-    ]
-    const { reply, model } = await generateReply(userId, role, userMessage, messages)
+    if (asksWhoIsOnLeaveToday(userMessage)) {
+      const reply = await getLeaveTodayReply(userId, role)
+      return {
+        message: {
+          id: randomUUID(),
+          role: 'assistant',
+          content: reply,
+          model: 'SNOWFLAKE_LIVE_DATA',
+          createdAt: new Date().toISOString(),
+        },
+      }
+    }
+
+    // Fetch user details for context
+    const userRows = await executeQuery<Record<string, unknown>>(
+      `SELECT U.FULL_NAME, E.EMPLOYEE_CODE
+       FROM ${usersTable} U
+       LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
+       WHERE U.ID = ?`,
+      [userId],
+    )
+    const fullName = String(userRows[0]?.FULL_NAME || 'User')
+    const employeeCode = userRows[0]?.EMPLOYEE_CODE ? String(userRows[0].EMPLOYEE_CODE) : null
+
+    const result = await runAgentLoop(
+      userMessage,
+      payload.history || [],
+      {
+        userId,
+        role,
+        fullName,
+        employeeCode,
+        requestId: payload.requestId || `req-${randomUUID()}`,
+      },
+    )
 
     return {
       message: {
         id: randomUUID(),
         role: 'assistant',
-        content: reply,
-        model,
+        content: result.reply,
+        model: result.model,
         createdAt: new Date().toISOString(),
+        confirmation: result.confirmation || null,
+      },
+    }
+  },
+
+  async widgetConfirm(
+    userId: number,
+    role: string,
+    confirmationToken: string,
+    requestId?: string,
+  ): Promise<{
+    message: string
+    leaveRequest: {
+      id: number
+      daysCount: number
+      status: string
+      startDate: string
+      endDate: string
+      leaveTypeName: string
+    }
+  }> {
+    const payload = confirmationService.verifyAndConsumeToken(confirmationToken, userId)
+
+    const startTime = Date.now()
+    const result = await leaveService.create(
+      userId,
+      {
+        leaveTypeId: payload.leaveTypeId,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        reason: payload.reason,
+        halfDaySession: payload.halfDaySession,
+      },
+      role,
+    )
+
+    await logAgentToolCall({
+      requestId: requestId || `req-confirm-${randomUUID()}`,
+      userId,
+      toolName: 'apply_leave',
+      args: {
+        leaveTypeId: payload.leaveTypeId,
+        leaveTypeName: payload.leaveTypeName,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        daysCount: payload.daysCount,
+        reason: payload.reason,
+      },
+      status: 'SUCCESS',
+      errorMessage: null,
+      executionTimeMs: Date.now() - startTime,
+    })
+
+    return {
+      message: `Your leave request for ${payload.leaveTypeName} (${payload.startDate} to ${payload.endDate}) has been submitted successfully.`,
+      leaveRequest: {
+        id: result.id,
+        daysCount: result.daysCount,
+        status: 'PENDING',
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        leaveTypeName: payload.leaveTypeName,
       },
     }
   },
