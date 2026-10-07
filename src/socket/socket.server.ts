@@ -18,6 +18,7 @@ export interface ServerToClientEvents {
   'typing:stop': (data: { conversationId: number; userId: number }) => void
   'presence:update': (data: { userId: number; isOnline: boolean; lastSeen?: string }) => void
   'conversation:updated': (data: { conversationId: number; lastMessage: ChatMessageItem }) => void
+  'holiday:changed': (data: { action: 'created' | 'updated' | 'deleted'; holiday: unknown }) => void
 }
 
 export interface ClientToServerEvents {

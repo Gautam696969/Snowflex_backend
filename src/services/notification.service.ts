@@ -140,6 +140,54 @@ export const notificationService = {
     return notification
   },
 
+  async notifyAllActiveUsers(input: Omit<CreateNotificationInput, 'userId'>): Promise<void> {
+    try {
+      // Single bulk insert for all ACTIVE users, excluding TERMINATED
+      await executeInsert(
+        `INSERT INTO ${notificationsTable} (
+          USER_ID, TYPE, TITLE, MESSAGE, LINK, RELATED_ID, IS_READ, CREATED_AT
+        )
+        SELECT U.ID, ?, ?, ?, ?, ?, FALSE, CURRENT_TIMESTAMP()
+        FROM ${usersTable} U
+        LEFT JOIN EMPLOYEES E ON E.USER_ID = U.ID
+        WHERE COALESCE(E.STATUS, U.STATUS, 'ACTIVE') = 'ACTIVE'`,
+        [
+          input.type,
+          input.title.slice(0, 200),
+          input.message.slice(0, 1000),
+          input.link ? input.link.slice(0, 300) : null,
+          input.relatedId ?? null,
+        ],
+      )
+
+      // Also push real-time events to currently connected active SSE streams
+      for (const userId of activeClients.keys()) {
+        try {
+          const counts = await this.getUnreadCounts(userId)
+          this.broadcastToUser(userId, 'notification', {
+            notification: {
+              id: Date.now(),
+              userId,
+              type: input.type,
+              title: input.title,
+              message: input.message,
+              link: input.link ?? null,
+              relatedId: input.relatedId ?? null,
+              isRead: false,
+              createdAt: new Date().toISOString(),
+              readAt: null,
+            },
+            unreadCounts: counts,
+          })
+        } catch {
+          // non-blocking
+        }
+      }
+    } catch (err) {
+      console.error('Failed to notify all active users:', err)
+    }
+  },
+
   async notifyAdmins(input: Omit<CreateNotificationInput, 'userId'>): Promise<void> {
     const adminRows = await executeQuery<Record<string, unknown>>(
       `SELECT ID FROM ${usersTable} WHERE REGEXP_REPLACE(UPPER(TRIM(ROLE)), '[[:space:]-]+', '_') = 'ADMIN'`,

@@ -23,6 +23,7 @@ import { dashboardRouter } from './routes/dashboard.routes'
 import { userRouter } from './routes/user.routes'
 import { notificationRouter } from './routes/notification.routes'
 import { chatRouter } from './routes/chat.routes'
+import { holidayRouter } from './routes/holiday.routes'
 import { isSnowflakeConnected } from './config/snowflake'
 import { isAllowedOrigin } from './config/cors'
 
@@ -121,6 +122,9 @@ export function createApp(service?: AuthServiceContract): Express {
 
   app.use('/api/chat', chatRouter)
   app.use('/chat', chatRouter)
+
+  app.use('/api/holidays', holidayRouter)
+  app.use('/holidays', holidayRouter)
 
   app.use((_request, response) => {
     response.status(404).json({ success: false, message: 'Not found' })
