@@ -163,20 +163,35 @@ export const notificationService = {
       // Also push real-time events to currently connected active SSE streams
       for (const userId of activeClients.keys()) {
         try {
-          const counts = await this.getUnreadCounts(userId)
+          const [latestRows, counts] = await Promise.all([
+            executeQuery<Record<string, unknown>>(
+              `SELECT ID, USER_ID, TYPE, TITLE, MESSAGE, LINK, RELATED_ID, IS_READ, CREATED_AT, READ_AT
+               FROM ${notificationsTable}
+               WHERE USER_ID = ? AND TYPE = ?
+               ORDER BY CREATED_AT DESC, ID DESC
+               LIMIT 1`,
+              [userId, input.type],
+            ),
+            this.getUnreadCounts(userId),
+          ])
+
+          const notification = latestRows[0]
+            ? toNotification(latestRows[0])
+            : {
+                id: Date.now(),
+                userId,
+                type: input.type,
+                title: input.title,
+                message: input.message,
+                link: input.link ?? null,
+                relatedId: input.relatedId ?? null,
+                isRead: false,
+                createdAt: new Date().toISOString(),
+                readAt: null,
+              }
+
           this.broadcastToUser(userId, 'notification', {
-            notification: {
-              id: Date.now(),
-              userId,
-              type: input.type,
-              title: input.title,
-              message: input.message,
-              link: input.link ?? null,
-              relatedId: input.relatedId ?? null,
-              isRead: false,
-              createdAt: new Date().toISOString(),
-              readAt: null,
-            },
+            notification,
             unreadCounts: counts,
           })
         } catch {
@@ -289,19 +304,37 @@ export const notificationService = {
   },
 
   async markAsRead(id: number, userId: number): Promise<boolean> {
+    let targetId = id
     const existing = await executeQuery<{ ID: number }>(
       `SELECT ID FROM ${notificationsTable} WHERE ID = ? AND USER_ID = ?`,
-      [id, userId],
+      [targetId, userId],
     )
     if (!existing || existing.length === 0) {
-      return false
+      // Fallback: If id is a timestamp (e.g. from Date.now() in legacy/optimistic SSE),
+      // mark the latest unread notification for this user as read
+      if (id > 1000000000000) {
+        const latestUnread = await executeQuery<{ ID: number }>(
+          `SELECT ID FROM ${notificationsTable}
+           WHERE USER_ID = ? AND IS_READ = FALSE
+           ORDER BY CREATED_AT DESC, ID DESC
+           LIMIT 1`,
+          [userId],
+        )
+        if (latestUnread && latestUnread.length > 0) {
+          targetId = Number(latestUnread[0].ID)
+        } else {
+          return true // Already marked read or no unread remaining
+        }
+      } else {
+        return false
+      }
     }
 
     await executeUpdate(
       `UPDATE ${notificationsTable}
        SET IS_READ = TRUE, READ_AT = CURRENT_TIMESTAMP()
        WHERE ID = ? AND USER_ID = ?`,
-      [id, userId],
+      [targetId, userId],
     )
 
     try {

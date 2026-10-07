@@ -17,6 +17,9 @@ export const notificationController = {
 
   async getUnreadCount(request: Request, response: Response, next: NextFunction): Promise<void> {
     try {
+      response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+      response.setHeader('Pragma', 'no-cache')
+      response.setHeader('Expires', '0')
       const counts = await notificationService.getUnreadCounts(request.user!.id)
       sendSuccess(response, 200, 'Unread notification counts fetched successfully', counts)
     } catch (error) {
