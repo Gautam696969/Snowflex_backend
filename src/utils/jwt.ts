@@ -7,6 +7,7 @@ export interface AuthenticatedUser {
   email: string
   role: string
   avatarUrl?: string | null
+  status?: string
 }
 
 export interface AuthTokenPayload {

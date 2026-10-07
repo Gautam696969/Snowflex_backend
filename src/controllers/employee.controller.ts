@@ -8,12 +8,40 @@ const broadRoles = ['ADMIN', 'SUPER_ADMIN', 'HR']
 export const employeeController = {
   async list(request: Request, response: Response, next: NextFunction) {
     try {
+      const status = typeof request.query.status === 'string' ? request.query.status : 'ACTIVE'
       const users = broadRoles.includes(request.user!.role)
-        ? await employeeService.list()
+        ? await employeeService.list(status)
         : request.user!.role === 'MANAGER'
           ? await employeeService.teamForUser(request.user!.id)
           : [await employeeService.forUser(request.user!.id)]
       sendSuccess(response, 200, 'Employees fetched successfully', users)
+    } catch (error) { next(error) }
+  },
+  async stats(_request: Request, response: Response, next: NextFunction) {
+    try {
+      const stats = await employeeService.stats()
+      sendSuccess(response, 200, 'Employee statistics fetched successfully', stats)
+    } catch (error) { next(error) }
+  },
+  async terminate(request: Request, response: Response, next: NextFunction) {
+    try {
+      const id = Number(request.params.id)
+      const { reason } = request.body as { reason: string }
+      const updated = await employeeService.terminate(id, reason, {
+        id: request.user!.id,
+        role: request.user!.role,
+      })
+      sendSuccess(response, 200, 'Employee terminated successfully', updated)
+    } catch (error) { next(error) }
+  },
+  async reactivate(request: Request, response: Response, next: NextFunction) {
+    try {
+      const id = Number(request.params.id)
+      const updated = await employeeService.reactivate(id, {
+        id: request.user!.id,
+        role: request.user!.role,
+      })
+      sendSuccess(response, 200, 'Employee reactivated successfully', updated)
     } catch (error) { next(error) }
   },
   async get(request: Request, response: Response, next: NextFunction) {

@@ -16,7 +16,7 @@ async function one(sql: string, binds: (string | number)[] = []): Promise<Record
 export const dashboardService = {
   async organization(): Promise<Record<string, unknown>> {
     return one(`SELECT
-      (SELECT COUNT(*) FROM ${employeesTable}) AS TOTAL_EMPLOYEES,
+      (SELECT COUNT(*) FROM ${employeesTable} WHERE STATUS = 'ACTIVE') AS TOTAL_EMPLOYEES,
       (SELECT COUNT(*) FROM ${employeesTable} WHERE STATUS = 'ACTIVE') AS ACTIVE_EMPLOYEES,
       (SELECT COUNT(*) FROM ${attendanceTable} WHERE ATTENDANCE_DATE = CURRENT_DATE() AND STATUS IN ('PRESENT','LATE')) AS PRESENT_TODAY,
       (SELECT COUNT(*) FROM ${employeesTable} WHERE STATUS = 'ACTIVE') - (SELECT COUNT(*) FROM ${attendanceTable} WHERE ATTENDANCE_DATE = CURRENT_DATE() AND STATUS IN ('PRESENT','LATE')) AS ABSENT_TODAY,
@@ -26,7 +26,7 @@ export const dashboardService = {
   },
   async manager(userId: number): Promise<Record<string, unknown>> {
     return one(`SELECT
-      (SELECT COUNT(*) FROM ${employeesTable} M JOIN ${employeesTable} E ON E.MANAGER_ID = M.ID WHERE M.USER_ID = ?) AS TEAM_SIZE,
+      (SELECT COUNT(*) FROM ${employeesTable} M JOIN ${employeesTable} E ON E.MANAGER_ID = M.ID WHERE M.USER_ID = ? AND E.STATUS = 'ACTIVE') AS TEAM_SIZE,
       (SELECT COUNT(*) FROM ${attendanceTable} A JOIN ${employeesTable} M ON A.EMPLOYEE_ID IN (SELECT E.ID FROM ${employeesTable} E WHERE E.MANAGER_ID = M.ID) WHERE M.USER_ID = ? AND A.ATTENDANCE_DATE = CURRENT_DATE() AND A.STATUS IN ('PRESENT','LATE')) AS TEAM_PRESENT_TODAY,
       (SELECT COUNT(*) FROM ${employeesTable} M JOIN ${employeesTable} E ON E.MANAGER_ID = M.ID WHERE M.USER_ID = ? AND E.STATUS = 'ACTIVE') - (SELECT COUNT(*) FROM ${attendanceTable} A JOIN ${employeesTable} E ON E.ID = A.EMPLOYEE_ID JOIN ${employeesTable} M ON M.ID = E.MANAGER_ID WHERE M.USER_ID = ? AND A.ATTENDANCE_DATE = CURRENT_DATE() AND A.STATUS IN ('PRESENT','LATE')) AS TEAM_ABSENT_TODAY,
       (SELECT COUNT(*) FROM ${leavesTable} L JOIN ${employeesTable} M ON L.EMPLOYEE_ID IN (SELECT E.ID FROM ${employeesTable} E WHERE E.MANAGER_ID = M.ID) WHERE M.USER_ID = ? AND L.STATUS = 'PENDING') AS PENDING_LEAVE_REQUESTS,
