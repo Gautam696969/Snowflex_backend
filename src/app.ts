@@ -24,25 +24,10 @@ import { userRouter } from './routes/user.routes'
 import { notificationRouter } from './routes/notification.routes'
 import { chatRouter } from './routes/chat.routes'
 import { isSnowflakeConnected } from './config/snowflake'
-
-function allowedOrigins(): Set<string> {
-  const configured = (process.env.CORS_ORIGIN ?? process.env.FRONTEND_URL ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
-  if (process.env.NODE_ENV !== 'production') {
-    configured.push('http://localhost:5173')
-  }
-  return new Set(configured)
-}
-
-function isLocalViteOrigin(origin: string): boolean {
-  return /^http:\/\/(localhost|127\.0\.0\.1):517\d$/.test(origin)
-}
+import { isAllowedOrigin } from './config/cors'
 
 export function createApp(service?: AuthServiceContract): Express {
   const app = express()
-  const origins = allowedOrigins()
 
   app.disable('x-powered-by')
   app.use(helmet({
@@ -52,16 +37,17 @@ export function createApp(service?: AuthServiceContract): Express {
   app.use(
     cors({
       origin(origin, callback) {
-        if (
-          !origin ||
-          origins.has(origin) ||
-          (process.env.NODE_ENV !== 'production' && isLocalViteOrigin(origin))
-        ) {
+        if (isAllowedOrigin(origin)) {
           callback(null, true)
-          return
+        } else {
+          callback(null, false)
         }
-        callback(new Error('Origin is not allowed'))
       },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+      exposedHeaders: ['Content-Disposition'],
+      maxAge: 86400,
     }),
   )
   app.use(express.json({ limit: '32kb' }))
@@ -72,39 +58,70 @@ export function createApp(service?: AuthServiceContract): Express {
   }
   app.use('/uploads', express.static(uploadsDir))
 
-  app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false }))
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: 'draft-8', legacyHeaders: false })
+  app.use('/api/auth', authLimiter)
+  app.use('/auth', authLimiter)
 
-  app.get('/api/health', (_request, response) => {
+  const handleHealth = (_request: express.Request, response: express.Response) => {
     const database = isSnowflakeConnected() || service ? 'connected' : 'disconnected'
     response.status(database === 'connected' ? 200 : 503).json({
       success: database === 'connected',
       message: database === 'connected' ? 'API is healthy' : 'Database unavailable',
       database,
     })
-  })
+  }
+
+  app.get('/api/health', handleHealth)
+  app.get('/health', handleHealth)
+
   app.use('/api/auth', createAuthRouter(service))
+  app.use('/auth', createAuthRouter(service))
+
   app.use('/api/admin', createAdminRouter(service))
+  app.use('/admin', createAdminRouter(service))
+
   app.use('/api/users', userRouter)
   app.use('/users', userRouter)
+
   app.use('/api/ai-employee', aiEmployeeRouter)
+  app.use('/ai-employee', aiEmployeeRouter)
+
   app.use('/api/voice', voiceRouter)
+  app.use('/voice', voiceRouter)
+
   app.use('/api/employees', employeeRouter)
+  app.use('/employees', employeeRouter)
+
   app.use('/api/departments', departmentRouter)
+  app.use('/departments', departmentRouter)
+
   app.use('/api/attendance', attendanceRouter)
+  app.use('/attendance', attendanceRouter)
+
   app.use('/api/leaves', leaveRouter)
   app.use('/leaves', leaveRouter)
+
   app.use('/api/leave-requests', leaveRouter)
   app.use('/leave-requests', leaveRouter)
+
   app.use('/api/leave-types', leaveTypeRouter)
   app.use('/leave-types', leaveTypeRouter)
+
   app.use('/api/leave-balances', leaveBalanceRouter)
   app.use('/leave-balances', leaveBalanceRouter)
+
   app.use('/api/tasks', taskRouter)
+  app.use('/tasks', taskRouter)
+
   app.use('/api/dashboard', dashboardRouter)
+  app.use('/dashboard', dashboardRouter)
+
   app.use('/api/notifications', notificationRouter)
   app.use('/notifications', notificationRouter)
+
   app.use('/api/chat', chatRouter)
   app.use('/chat', chatRouter)
+
   app.use((_request, response) => {
     response.status(404).json({ success: false, message: 'Not found' })
   })

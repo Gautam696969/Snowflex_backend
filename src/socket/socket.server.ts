@@ -8,6 +8,7 @@ import { chatRateLimiter } from './chatRateLimiter'
 import { logger } from '../utils/logger'
 
 import { ChatMessageItem } from '../services/chat.service'
+import { isAllowedOrigin } from '../config/cors'
 
 export interface ServerToClientEvents {
   'message:new': (message: ChatMessageItem) => void
@@ -39,21 +40,6 @@ export function getSocketServer(): SocketIOServer<ClientToServerEvents, ServerTo
   return ioInstance
 }
 
-function parseAllowedOrigins(): string[] {
-  const envOrigins = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-
-  if (process.env.NODE_ENV !== 'production') {
-    if (!envOrigins.includes('http://localhost:5173')) {
-      envOrigins.push('http://localhost:5173')
-    }
-  }
-
-  return envOrigins
-}
-
 const messageSendSchema = z.object({
   conversationId: z.number().int().positive('conversationId is required'),
   recipientId: z.number().int().positive('recipientId is required'),
@@ -62,18 +48,12 @@ const messageSendSchema = z.object({
 })
 
 export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData> {
-  const allowedOrigins = parseAllowedOrigins()
-
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
     httpServer,
     {
       cors: {
         origin(origin, callback) {
-          if (
-            !origin ||
-            allowedOrigins.includes(origin) ||
-            (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):517\d$/.test(origin))
-          ) {
+          if (isAllowedOrigin(origin)) {
             callback(null, true)
           } else {
             callback(new Error('Origin not allowed by Socket.IO CORS'))
