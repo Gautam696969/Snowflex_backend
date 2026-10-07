@@ -70,13 +70,13 @@ export function createAdminController(service: AuthServiceContract = authService
         try {
           const statsQuery = await executeQuery<Record<string, unknown>>(`
             SELECT
-              (SELECT COUNT(*) FROM ${usersTable}) AS TOTAL_USERS,
-              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'ADMIN') AS TOTAL_ADMINS,
-              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'SUPER_ADMIN') AS TOTAL_SUPER_ADMINS,
-              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'HR') AS TOTAL_HR,
-              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'MANAGER') AS TOTAL_MANAGERS,
-              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE IN ('EMPLOYEE', 'USER')) AS TOTAL_EMPLOYEES,
-              (SELECT COUNT(*) FROM ${employeesTable}) AS TOTAL_EMPLOYEE_PROFILES,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_USERS,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'ADMIN' AND COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_ADMINS,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'SUPER_ADMIN' AND COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_SUPER_ADMINS,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'HR' AND COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_HR,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE = 'MANAGER' AND COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_MANAGERS,
+              (SELECT COUNT(*) FROM ${usersTable} WHERE ROLE IN ('EMPLOYEE', 'USER') AND COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_EMPLOYEES,
+              (SELECT COUNT(*) FROM ${employeesTable} WHERE COALESCE(STATUS, 'ACTIVE') = 'ACTIVE') AS TOTAL_EMPLOYEE_PROFILES,
               (SELECT COUNT(*) FROM ${departmentsTable}) AS TOTAL_DEPARTMENTS
           `)
           const s = statsQuery[0] || {}

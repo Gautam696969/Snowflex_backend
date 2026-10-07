@@ -52,6 +52,7 @@ interface UserRow {
   PASSWORD_HASH: string
   ROLE: string
   AVATAR_URL?: string | null
+  STATUS?: string | null
 }
 
 export interface LoginResult {
@@ -67,6 +68,8 @@ export interface AuthServiceContract {
   forgotPassword(email: string, origin?: string): Promise<void>
   resetPassword(token: string, newPassword: string): Promise<void>
 }
+
+import { getUserStatus } from './user-status.service'
 
 async function findUserByEmail(email: string): Promise<UserRow | undefined> {
   // Keep user input in binds, never in SQL text.
@@ -120,6 +123,11 @@ export const authService: AuthServiceContract = {
       throw new HttpError(401, 'Invalid email or password')
     }
 
+    const userStatus = await getUserStatus(user.ID)
+    if (userStatus === 'TERMINATED') {
+      throw new HttpError(403, 'Your account has been deactivated. Please contact HR.')
+    }
+
     await executeQuery(`UPDATE ${usersTable} SET LAST_LOGIN = CURRENT_TIMESTAMP() WHERE ID = ?`, [user.ID])
     const safeUser = toSafeUser(user)
     return { token: createToken(toTokenPayload(safeUser)), user: safeUser }
@@ -138,7 +146,11 @@ export const authService: AuthServiceContract = {
 
   async listUsers() {
     const rows = await executeQuery<UserRow>(
-      `SELECT ID, FULL_NAME, EMAIL, ROLE, AVATAR_URL FROM ${usersTable} ORDER BY ID`,
+      `SELECT U.ID, U.FULL_NAME, U.EMAIL, U.ROLE, U.AVATAR_URL,
+              COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS
+       FROM ${usersTable} U
+       LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
+       ORDER BY U.ID`,
     )
     return rows.map(toSafeUser)
   },
@@ -146,6 +158,11 @@ export const authService: AuthServiceContract = {
   async forgotPassword(email: string, clientOrigin?: string) {
     const user = await findUserByEmail(email)
     if (!user) {
+      return
+    }
+
+    const userStatus = String(user.STATUS || 'ACTIVE').toUpperCase()
+    if (userStatus === 'TERMINATED') {
       return
     }
 
@@ -227,6 +244,17 @@ export const authService: AuthServiceContract = {
 
     if (!userId) {
       throw new HttpError(400, 'Invalid or expired reset token')
+    }
+
+    const userStatusRows = await executeQuery<UserRow>(
+      `SELECT COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS
+       FROM ${usersTable} U
+       LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
+       WHERE U.ID = ?`,
+      [userId],
+    )
+    if (String(userStatusRows[0]?.STATUS || 'ACTIVE').toUpperCase() === 'TERMINATED') {
+      throw new HttpError(403, 'Your account has been deactivated. Please contact HR.')
     }
 
     const passwordHash = await hashPassword(newPassword)

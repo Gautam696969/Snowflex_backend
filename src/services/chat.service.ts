@@ -171,10 +171,10 @@ export const chatService = {
     // Fetch all active users except the current user
     const rows = await executeQuery<Record<string, unknown>>(
       `SELECT U.ID, U.FULL_NAME, U.EMAIL, U.ROLE, U.AVATAR_URL,
-              COALESCE(E.STATUS, 'ACTIVE') AS STATUS
+              COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS
        FROM ${usersTable} U
        LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
-       WHERE U.ID <> ? AND COALESCE(E.STATUS, 'ACTIVE') = 'ACTIVE'
+       WHERE U.ID <> ? AND COALESCE(E.STATUS, U.STATUS, 'ACTIVE') = 'ACTIVE'
        ORDER BY U.FULL_NAME ASC`,
       [userId]
     )
@@ -223,7 +223,7 @@ export const chatService = {
         CASE WHEN C.USER_A_ID = ? THEN U_B.EMAIL ELSE U_A.EMAIL END AS OTHER_EMAIL,
         CASE WHEN C.USER_A_ID = ? THEN U_B.ROLE ELSE U_A.ROLE END AS OTHER_ROLE,
         CASE WHEN C.USER_A_ID = ? THEN U_B.AVATAR_URL ELSE U_A.AVATAR_URL END AS OTHER_AVATAR_URL,
-        CASE WHEN C.USER_A_ID = ? THEN COALESCE(E_B.STATUS, 'ACTIVE') ELSE COALESCE(E_A.STATUS, 'ACTIVE') END AS OTHER_STATUS,
+        CASE WHEN C.USER_A_ID = ? THEN COALESCE(E_B.STATUS, U_B.STATUS, 'ACTIVE') ELSE COALESCE(E_A.STATUS, U_A.STATUS, 'ACTIVE') END AS OTHER_STATUS,
         LM.ID AS LAST_MSG_ID,
         LM.SENDER_ID AS LAST_MSG_SENDER_ID,
         LM.BODY AS LAST_MSG_BODY,

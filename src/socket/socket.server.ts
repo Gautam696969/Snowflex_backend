@@ -40,6 +40,14 @@ export function getSocketServer(): SocketIOServer<ClientToServerEvents, ServerTo
   return ioInstance
 }
 
+import { getUserStatus } from '../services/user-status.service'
+
+export function disconnectUserSockets(userId: number): void {
+  if (!ioInstance) return
+  const userRoom = `user:${userId}`
+  ioInstance.in(userRoom).disconnectSockets(true)
+}
+
 const messageSendSchema = z.object({
   conversationId: z.number().int().positive('conversationId is required'),
   recipientId: z.number().int().positive('recipientId is required'),
@@ -67,7 +75,7 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
   )
 
   // Handshake authentication
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token =
         socket.handshake.auth?.token ||
@@ -81,6 +89,12 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
       }
 
       const decoded = verifyToken(token)
+
+      const status = await getUserStatus(decoded.id)
+      if (status === 'TERMINATED') {
+        return next(new Error('Your account has been deactivated. Please contact HR.'))
+      }
+
       // Derive userId and role ONLY from verified token
       socket.data.user = {
         id: decoded.id,

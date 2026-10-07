@@ -9,6 +9,7 @@ import { verifyMailSetup } from './services/email.service'
 import http from 'node:http'
 import { initSocketServer } from './socket/socket.server'
 import { chatService } from './services/chat.service'
+import { ensureTerminationTables } from './services/user-status.service'
 
 async function startServer(): Promise<void> {
   let env: ReturnType<typeof getEnvironment>
@@ -42,6 +43,10 @@ async function startServer(): Promise<void> {
 
   await chatService.ensureTables().catch((err) => {
     logger.warn('Could not ensure chat tables in Snowflake:', err)
+  })
+
+  await ensureTerminationTables().catch((err) => {
+    logger.warn('Could not ensure termination tables in Snowflake:', err)
   })
 
   const app = createApp()
