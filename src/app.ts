@@ -15,6 +15,7 @@ import { voiceRouter } from './routes/voice.routes'
 import { employeeRouter } from './routes/employee.routes'
 import { departmentRouter } from './routes/department.routes'
 import { attendanceRouter } from './routes/attendance.routes'
+import { attendanceRequestRouter } from './routes/attendance-request.routes'
 import { leaveRouter } from './routes/leave.routes'
 import { leaveTypeRouter } from './routes/leave-type.routes'
 import { leaveBalanceRouter } from './routes/leave-balance.routes'
@@ -99,6 +100,9 @@ export function createApp(service?: AuthServiceContract): Express {
 
   app.use('/api/attendance', attendanceRouter)
   app.use('/attendance', attendanceRouter)
+
+  app.use('/api/attendance-requests', attendanceRequestRouter)
+  app.use('/attendance-requests', attendanceRequestRouter)
 
   app.use('/api/leaves', leaveRouter)
   app.use('/leaves', leaveRouter)
