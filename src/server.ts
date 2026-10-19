@@ -11,6 +11,7 @@ import { initSocketServer } from './socket/socket.server'
 import { chatService } from './services/chat.service'
 import { ensureTerminationTables } from './services/user-status.service'
 import { holidayService } from './services/holiday.service'
+import { attendanceRequestService } from './services/attendance-request.service'
 
 async function startServer(): Promise<void> {
   let env: ReturnType<typeof getEnvironment>
@@ -52,6 +53,10 @@ async function startServer(): Promise<void> {
 
   await holidayService.ensureTables().catch((err) => {
     logger.warn('Could not ensure holidays table in Snowflake:', err)
+  })
+
+  await attendanceRequestService.ensureTables().catch((err) => {
+    logger.warn('Could not ensure attendance requests table in Snowflake:', err)
   })
 
   const app = createApp()

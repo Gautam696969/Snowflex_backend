@@ -9,6 +9,8 @@ import { logger } from '../utils/logger'
 
 import { ChatMessageItem } from '../services/chat.service'
 import { isAllowedOrigin } from '../config/cors'
+import { AttendanceRequestItem } from '../types/attendance-request.types'
+import { normalizeRole } from '../utils/roles'
 
 export interface ServerToClientEvents {
   'message:new': (message: ChatMessageItem) => void
@@ -21,6 +23,19 @@ export interface ServerToClientEvents {
   'holiday:changed': (data: { action: 'created' | 'updated' | 'deleted'; holiday: unknown }) => void
   'theme:updated': (data: unknown) => void
   'theme:reset': (data: { userId: number }) => void
+  'attendance_request:created': (data: {
+    request: AttendanceRequestItem
+    employeeName: string
+  }) => void
+  'attendance_request:decided': (data: {
+    requestId: number
+    status: 'APPROVED' | 'REJECTED'
+    decidedByName: string
+    decidedByRole: string
+    decidedAt: string
+    rejectReason?: string | null
+    request?: AttendanceRequestItem
+  }) => void
 }
 
 export interface ClientToServerEvents {
@@ -125,6 +140,12 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
 
     // Join personal user room for multi-device/multi-tab synchronization
     await socket.join(userRoom)
+
+    // Join approvers room if role has approval permissions
+    const userRole = normalizeRole(user.role)
+    if (['ADMIN', 'HR', 'SUPER_ADMIN'].includes(userRole)) {
+      await socket.join('approvers')
+    }
 
     // Update presence
     const { wasOffline } = presenceManager.addConnection(userId, socket.id)
@@ -250,4 +271,29 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
 
   ioInstance = io
   return io
+}
+
+export function broadcastAttendanceRequestCreated(payload: {
+  request: AttendanceRequestItem
+  employeeName: string
+}): void {
+  if (!ioInstance) return
+  ioInstance.to('approvers').emit('attendance_request:created', payload)
+}
+
+export function broadcastAttendanceRequestDecided(
+  employeeUserId: number,
+  payload: {
+    requestId: number
+    status: 'APPROVED' | 'REJECTED'
+    decidedByName: string
+    decidedByRole: string
+    decidedAt: string
+    rejectReason?: string | null
+    request?: AttendanceRequestItem
+  }
+): void {
+  if (!ioInstance) return
+  ioInstance.to('approvers').emit('attendance_request:decided', payload)
+  ioInstance.to(`user:${employeeUserId}`).emit('attendance_request:decided', payload)
 }
