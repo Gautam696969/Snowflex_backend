@@ -48,10 +48,10 @@ describe('employee dashboard', () => {
       .expect(200)
 
     expect(executeQueryMock.mock.calls[0][0]).toBe(
-      'SELECT ID FROM "AUTH_PROJECT"."PUBLIC"."EMPLOYEES" WHERE USER_ID = ?',
+      'SELECT ID FROM "EMPLOYEES" WHERE USER_ID = ?',
     )
     expect(executeQueryMock.mock.calls[1][0]).toContain(
-      'FROM "AUTH_PROJECT"."PUBLIC"."ATTENDANCE"',
+      'FROM "ATTENDANCE"',
     )
   })
 

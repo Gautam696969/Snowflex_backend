@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { executeQueryMock, executeInsertMock, executeUpdateMock } = vi.hoisted(() => ({
   executeQueryMock: vi.fn(),
@@ -27,7 +27,13 @@ const dummyContext: AgentContext = {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-06T10:00:00Z'))
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('Agent Date Parser', () => {

@@ -2,13 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { testSnowflakeConnection } from '../src/config/snowflake'
 
 const connectionVariables = [
-  'SNOWFLAKE_ACCOUNT',
-  'SNOWFLAKE_USERNAME',
-  'SNOWFLAKE_PASSWORD',
-  'SNOWFLAKE_WAREHOUSE',
-  'SNOWFLAKE_DATABASE',
-  'SNOWFLAKE_SCHEMA',
-  'SNOWFLAKE_ROLE',
+  'CLOUDFLARE_ACCOUNT_ID',
+  'CLOUDFLARE_DATABASE_ID',
+  'CLOUDFLARE_API_TOKEN',
 ]
 const savedValues = new Map<string, string | undefined>()
 
@@ -28,8 +24,8 @@ afterEach(() => {
   }
 })
 
-describe('Snowflake connection check', () => {
+describe('Cloudflare D1 connection check', () => {
   it('fails with a sanitized error when connection settings are missing', async () => {
-    await expect(testSnowflakeConnection()).rejects.toThrow('Snowflake connection failed')
+    await expect(testSnowflakeConnection()).rejects.toThrow('Cloudflare D1 configuration is incomplete')
   })
 })

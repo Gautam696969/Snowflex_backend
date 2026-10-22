@@ -47,7 +47,7 @@ export const employeeService = {
         SELECT
           L.EMPLOYEE_ID,
           COUNT(L.ID) AS PENDING_COUNT,
-          LISTAGG(DISTINCT COALESCE(T.NAME, 'Not specified'), ', ') WITHIN GROUP (ORDER BY COALESCE(T.NAME, 'Not specified') ASC) AS PENDING_TYPE_NAMES
+          REPLACE(GROUP_CONCAT(DISTINCT COALESCE(T.NAME, 'Not specified')), ',', ', ') AS PENDING_TYPE_NAMES
         FROM ${leaveRequestsTable} L
         LEFT JOIN ${leaveTypesTable} T ON T.ID = L.LEAVE_TYPE_ID
         WHERE L.STATUS = 'PENDING'

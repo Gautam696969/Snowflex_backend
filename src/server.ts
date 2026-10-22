@@ -32,11 +32,11 @@ async function startServer(): Promise<void> {
   validateGroqConfig()
 
   try {
-    logger.info('Connecting to Snowflake...')
+    logger.info('Connecting to Cloudflare D1...')
     await testSnowflakeConnection()
-    logger.success('Snowflake connected successfully')
-  } catch {
-    logger.error('Snowflake connection failed. Check server configuration and connectivity.')
+    logger.success('Cloudflare D1 connected successfully')
+  } catch (err) {
+    logger.error('Cloudflare D1 connection failed. Check server configuration and connectivity:', err)
     process.exitCode = 1
     return
   }

@@ -7,6 +7,7 @@ const employeesTable = snowflakeTable('EMPLOYEES')
 
 interface CachedStatus {
   status: string
+  role?: string
   expiresAt: number
 }
 
@@ -14,19 +15,19 @@ interface CachedStatus {
 const statusCache = new Map<number, CachedStatus>()
 const STATUS_CACHE_TTL_MS = 30_000
 
-export async function getUserStatus(userId: number): Promise<string> {
+export async function getUserAccountInfo(userId: number): Promise<{ status: string; role?: string }> {
   const cached = statusCache.get(userId)
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.status
+  if (cached && cached.expiresAt > Date.now() && cached.role) {
+    return { status: cached.status, role: cached.role }
   }
 
   if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
-    return cached?.status || 'ACTIVE'
+    return { status: cached?.status || 'ACTIVE', role: cached?.role }
   }
 
   try {
     const rows = await executeQuery<DbRow>(
-      `SELECT COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS
+      `SELECT COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS, U.ROLE
        FROM ${usersTable} U
        LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
        WHERE U.ID = ?`,
@@ -35,12 +36,29 @@ export async function getUserStatus(userId: number): Promise<string> {
 
     const rawStatus = rows[0]?.STATUS
     const status = String(rawStatus || 'ACTIVE').toUpperCase()
-    statusCache.set(userId, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS })
-    return status
+    const role = rows[0]?.ROLE ? String(rows[0].ROLE).toUpperCase() : undefined
+    statusCache.set(userId, { status, role, expiresAt: Date.now() + STATUS_CACHE_TTL_MS })
+    return { status, role }
   } catch {
-    // If query fails, fall back to cached status if available, else assume ACTIVE
-    if (cached) return cached.status
-    return 'ACTIVE'
+    if (cached) return { status: cached.status, role: cached.role }
+    return { status: 'ACTIVE' }
+  }
+}
+
+export async function getUserStatus(userId: number): Promise<string> {
+  const info = await getUserAccountInfo(userId)
+  return info.status
+}
+
+export async function getLiveUserRole(userId: number): Promise<string | undefined> {
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return undefined
+  }
+  try {
+    const info = await getUserAccountInfo(userId)
+    return info.role
+  } catch {
+    return undefined
   }
 }
 

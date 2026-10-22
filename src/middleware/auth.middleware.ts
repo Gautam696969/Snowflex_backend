@@ -3,7 +3,7 @@ import { AuthTokenPayload, verifyToken } from '../utils/jwt'
 import { HttpError } from '../utils/http-error'
 import { sendError } from '../utils/apiResponse'
 import { normalizeRole } from '../utils/roles'
-import { getUserStatus } from '../services/user-status.service'
+import { getLiveUserRole, getUserStatus } from '../services/user-status.service'
 
 declare global {
   namespace Express {
@@ -31,6 +31,17 @@ export async function requireAuth(request: Request, response: Response, next: Ne
     if (status === 'TERMINATED') {
       sendError(response, 403, 'Your account has been deactivated. Please contact HR.')
       return
+    }
+
+    try {
+      if (typeof getLiveUserRole === 'function') {
+        const liveRole = await getLiveUserRole(decoded.id)
+        if (liveRole) {
+          request.user.role = normalizeRole(liveRole)
+        }
+      }
+    } catch {
+      // Fall back to decoded role
     }
 
     next()

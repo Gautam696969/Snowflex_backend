@@ -34,16 +34,16 @@ describe('authService role migration', () => {
     await authService.register('New User', 'new@example.com', 'Password123')
 
     expect(queryMock.mock.calls[0][0]).toBe(
-      'SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM "AUTH_PROJECT"."PUBLIC"."USERS" WHERE EMAIL = ?',
+      'SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM "USERS" WHERE EMAIL = ?',
     )
     expect(queryMock.mock.calls[1][0]).toContain(
-      'INSERT INTO "AUTH_PROJECT"."PUBLIC"."USERS"',
+      'INSERT INTO "USERS"',
     )
     expect(queryMock.mock.calls[2][0]).toContain(
-      'SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM "AUTH_PROJECT"."PUBLIC"."USERS"',
+      'SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM "USERS"',
     )
     expect(queryMock.mock.calls[3][0]).toContain(
-      'INSERT INTO "AUTH_PROJECT"."PUBLIC"."EMPLOYEES"',
+      'INSERT INTO "EMPLOYEES"',
     )
   })
 
@@ -60,8 +60,8 @@ describe('authService role migration', () => {
 
     const result = await authService.login('legacy@example.com', 'Password123')
     expect(result.user.role).toBe('EMPLOYEE')
-    expect(queryMock.mock.calls[0][0]).toContain('FROM "AUTH_PROJECT"."PUBLIC"."USERS"')
-    expect(queryMock.mock.calls[1][0]).toContain('UPDATE "AUTH_PROJECT"."PUBLIC"."USERS"')
+    expect(queryMock.mock.calls[0][0]).toContain('FROM "USERS"')
+    expect(queryMock.mock.calls[1][0]).toContain('UPDATE "USERS"')
     const claims = jwt.decode(result.token) as jwt.JwtPayload
     expect(claims.role).toBe('EMPLOYEE')
   })
@@ -82,7 +82,7 @@ describe('authService role migration', () => {
       avatarUrl: null,
     })
     expect(queryMock.mock.calls[0][0]).toBe(
-      'SELECT ID, FULL_NAME, EMAIL, ROLE, AVATAR_URL FROM "AUTH_PROJECT"."PUBLIC"."USERS" WHERE ID = ?',
+      'SELECT ID, FULL_NAME, EMAIL, ROLE, AVATAR_URL FROM "USERS" WHERE ID = ?',
     )
   })
 })

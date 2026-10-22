@@ -42,7 +42,7 @@ beforeEach(() => {
   executeQueryMock.mockImplementation(async (sql: string) => {
     if (sql.includes('SELECT ID FROM') && sql.includes('USER_ID = ?')) return [{ ID: 91 }]
     if (sql.includes('SELECT ROLE, CONTENT')) return [{ ROLE: 'USER', CONTENT: 'Who is on leave today?' }]
-    if (sql.includes('FROM "AUTH_PROJECT"."PUBLIC"."LEAVE_REQUESTS" L')) return leaveRows
+    if (sql.includes('LEAVE_REQUESTS') && sql.includes('L.STATUS')) return leaveRows
     if (sql.includes('ORDER BY CREATED_AT DESC LIMIT 1')) return [{
       ID: 501,
       CONVERSATION_ID: 91,
