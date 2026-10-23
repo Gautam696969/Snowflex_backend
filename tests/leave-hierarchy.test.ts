@@ -270,7 +270,11 @@ describe('leave approval hierarchy', () => {
   })
 
   it('auto-approves a Super Admin request when no other active Super Admin exists', async () => {
-    const futureDate = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+    const nextWeekday = new Date()
+    do {
+      nextWeekday.setDate(nextWeekday.getDate() + 1)
+    } while (nextWeekday.getDay() === 0 || nextWeekday.getDay() === 6)
+    const futureDate = nextWeekday.toISOString().split('T')[0]
     const result = await leaveService.create(20, {
       leaveTypeId: 4,
       startDate: futureDate,

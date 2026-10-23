@@ -98,6 +98,9 @@ export function normalizeSql(sqlText: string): string {
   sql = sql.replace(/LISTAGG\(\s*DISTINCT\s+([^,]+)\s*,\s*'[^']*'\s*\)\s+WITHIN\s+GROUP\s*\([^)]*\)/gi, "REPLACE(GROUP_CONCAT(DISTINCT $1), ',', ', ')")
   sql = sql.replace(/LISTAGG\(\s*([^,]+)\s*,\s*'[^']*'\s*\)\s+WITHIN\s+GROUP\s*\([^)]*\)/gi, "REPLACE(GROUP_CONCAT($1), ',', ', ')")
 
+  // 14. Replace Snowflake TO_VARCHAR(x, 'YYYY-MM-DD') with SQLite date(x) or string
+  sql = sql.replace(/\bTO_VARCHAR\(([^,)]+)(?:,\s*'[^']*')?\)/gi, 'date($1)')
+
   return sql
 }
 

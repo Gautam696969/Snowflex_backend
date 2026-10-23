@@ -84,8 +84,8 @@ async function getLeaveTodayReply(userId: number, role: string): Promise<string>
   const binds = scope ? [userId] : []
   const rows = await executeQuery<Record<string, unknown>>(
     `SELECT U.FULL_NAME, T.NAME AS LEAVE_TYPE,
-       TO_VARCHAR(L.START_DATE, 'YYYY-MM-DD') AS START_DATE,
-       TO_VARCHAR(L.END_DATE, 'YYYY-MM-DD') AS END_DATE
+       L.START_DATE AS START_DATE,
+       L.END_DATE AS END_DATE
      FROM ${leaveRequestsTable} L
      JOIN ${employeesTable} E ON E.ID = L.EMPLOYEE_ID
      JOIN ${usersTable} U ON U.ID = E.USER_ID
