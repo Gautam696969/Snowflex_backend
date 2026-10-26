@@ -74,6 +74,16 @@ export function createApp(service?: AuthServiceContract): Express {
     })
   }
 
+  app.get('/', (_request: express.Request, response: express.Response) => {
+    response.status(200).json({
+      success: true,
+      message: 'Snowflex Backend API is running',
+      version: '1.0.0',
+      status: 'healthy',
+      health: '/api/health',
+    })
+  })
+
   app.get('/api/health', handleHealth)
   app.get('/health', handleHealth)
 
