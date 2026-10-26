@@ -1,6 +1,7 @@
 import { executeQuery } from '../config/snowflake'
 import { DbRow } from '../utils/rows'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
+import { normalizeRole } from '../utils/roles'
 
 const usersTable = snowflakeTable('USERS')
 const employeesTable = snowflakeTable('EMPLOYEES')
@@ -27,16 +28,30 @@ export async function getUserAccountInfo(userId: number): Promise<{ status: stri
 
   try {
     const rows = await executeQuery<DbRow>(
-      `SELECT COALESCE(E.STATUS, U.STATUS, 'ACTIVE') AS STATUS, U.ROLE
+      `SELECT U.STATUS AS USER_STATUS, E.STATUS AS EMP_STATUS, U.ROLE
        FROM ${usersTable} U
        LEFT JOIN ${employeesTable} E ON E.USER_ID = U.ID
        WHERE U.ID = ?`,
       [userId],
     )
 
-    const rawStatus = rows[0]?.STATUS
-    const status = String(rawStatus || 'ACTIVE').toUpperCase()
-    const role = rows[0]?.ROLE ? String(rows[0].ROLE).toUpperCase() : undefined
+    if (!rows[0]) {
+      return { status: 'ACTIVE' }
+    }
+
+    const rawRole = rows[0]?.ROLE ? String(rows[0].ROLE) : undefined
+    const role = rawRole ? normalizeRole(rawRole) : undefined
+    const userStatus = String(rows[0]?.USER_STATUS || 'ACTIVE').toUpperCase()
+    const empStatus = rows[0]?.EMP_STATUS ? String(rows[0].EMP_STATUS).toUpperCase() : null
+
+    // Super Admin and Admin accounts are governed by USERS.STATUS, preventing orphaned/inactive EMPLOYEES sub-records from causing lockout
+    let status = userStatus
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+      status = userStatus
+    } else {
+      status = empStatus || userStatus
+    }
+
     statusCache.set(userId, { status, role, expiresAt: Date.now() + STATUS_CACHE_TTL_MS })
     return { status, role }
   } catch {

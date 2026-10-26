@@ -4,6 +4,7 @@ import { HttpError } from '../utils/http-error'
 import { sendError } from '../utils/apiResponse'
 import { normalizeRole } from '../utils/roles'
 import { getLiveUserRole, getUserStatus } from '../services/user-status.service'
+import { logger } from '../utils/logger'
 
 declare global {
   namespace Express {
@@ -29,6 +30,7 @@ export async function requireAuth(request: Request, response: Response, next: Ne
 
     const status = await getUserStatus(decoded.id)
     if (status === 'TERMINATED') {
+      logger.warn(`[DEBUG_AUTH] requireAuth rejected: userId=${decoded.id} has TERMINATED status`)
       sendError(response, 403, 'Your account has been deactivated. Please contact HR.')
       return
     }
@@ -45,7 +47,8 @@ export async function requireAuth(request: Request, response: Response, next: Ne
     }
 
     next()
-  } catch {
+  } catch (authError) {
+    logger.warn(`[DEBUG_AUTH] requireAuth token verification failed for path=${request.originalUrl}:`, (authError as Error)?.message)
     sendError(response, 401, 'Unauthorized')
   }
 }
@@ -56,7 +59,10 @@ export function authorizeRoles(...roles: string[]) {
       next(new HttpError(401, 'Unauthorized'))
       return
     }
-    if (!roles.map(normalizeRole).includes(normalizeRole(request.user.role))) {
+    const userRole = normalizeRole(request.user.role)
+    const normalizedAllowed = roles.map(normalizeRole)
+    if (!normalizedAllowed.includes(userRole)) {
+      logger.warn(`[DEBUG_AUTH] Access forbidden: path=${request.originalUrl}, userId=${request.user.id}, userRole="${request.user.role}" (normalized: "${userRole}"), allowedRoles=[${normalizedAllowed.join(', ')}]`)
       next(new HttpError(403, 'Forbidden'))
       return
     }

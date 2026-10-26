@@ -7,17 +7,17 @@ import { AuthServiceContract } from '../services/auth.service'
 
 const registerSchema = z.object({
   fullName: z.string().trim().min(1).max(150),
-  email: z.string().trim().email().max(255),
+  email: z.string().trim().toLowerCase().email().max(255),
   password: z.string().min(8).max(72),
 })
 
 const loginSchema = z.object({
-  email: z.string().trim().email().max(255),
+  email: z.string().trim().toLowerCase().email().max(255),
   password: z.string().min(1).max(72),
 })
 
 const forgotPasswordSchema = z.object({
-  email: z.string().trim().email().max(255),
+  email: z.string().trim().toLowerCase().email().max(255),
 })
 
 const resetPasswordSchema = z.object({

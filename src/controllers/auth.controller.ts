@@ -21,7 +21,8 @@ export function createAuthController(service: AuthServiceContract = authService)
     login: async (request: Request, response: Response, next: NextFunction) => {
       try {
         const { email, password } = request.body as { email: string; password: string }
-        const result = await service.login(email, password)
+        const cleanEmail = (email || '').trim().toLowerCase()
+        const result = await service.login(cleanEmail, password)
         sendSuccess(response, 200, 'Login successful', result)
       } catch (error) {
         next(error)

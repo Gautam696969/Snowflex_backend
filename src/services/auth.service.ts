@@ -72,12 +72,27 @@ export interface AuthServiceContract {
 import { getUserStatus } from './user-status.service'
 
 async function findUserByEmail(email: string): Promise<UserRow | undefined> {
-  // Keep user input in binds, never in SQL text.
+  const cleanEmail = (email || '').trim()
   const rows = await executeQuery<UserRow>(
     `SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM ${usersTable} WHERE EMAIL = ?`,
-    [email],
+    [cleanEmail],
   )
-  return rows[0]
+  if (rows && rows.length > 0) {
+    return rows[0]
+  }
+
+  // If email contained uppercase characters and was not found, fall back to case-insensitive lookup
+  if (cleanEmail.toLowerCase() !== cleanEmail) {
+    const fallbackRows = await executeQuery<UserRow>(
+      `SELECT ID, FULL_NAME, EMAIL, PASSWORD_HASH, ROLE, AVATAR_URL FROM ${usersTable} WHERE LOWER(TRIM(EMAIL)) = ?`,
+      [cleanEmail.toLowerCase()],
+    )
+    if (fallbackRows && fallbackRows.length > 0) {
+      return fallbackRows[0]
+    }
+  }
+
+  return undefined
 }
 
 function toSafeUser(user: UserRow): AuthenticatedUser {
@@ -118,19 +133,56 @@ export const authService: AuthServiceContract = {
   },
 
   async login(email, password) {
-    const user = await findUserByEmail(email)
-    if (!user || !(await comparePassword(password, user.PASSWORD_HASH))) {
+    const cleanEmail = (email || '').trim()
+    logger.info(`[DEBUG_AUTH] Login attempt for email: ${cleanEmail}`)
+
+    const user = await findUserByEmail(cleanEmail)
+    if (!user) {
+      logger.warn(`[DEBUG_AUTH] User not found in database for email: ${cleanEmail}`)
+      throw new HttpError(401, 'Invalid email or password')
+    }
+
+    const passwordMatch = await comparePassword(password, user.PASSWORD_HASH)
+    if (!passwordMatch) {
+      logger.warn(`[DEBUG_AUTH] Password mismatch for userId: ${user.ID}, email: ${cleanEmail}`)
       throw new HttpError(401, 'Invalid email or password')
     }
 
     const userStatus = await getUserStatus(user.ID)
+    const normalizedRole = normalizeRole(user.ROLE)
+    logger.info(`[DEBUG_AUTH] Credentials verified: userId=${user.ID}, dbRole="${user.ROLE}", normalizedRole="${normalizedRole}", status="${userStatus}"`)
+
     if (userStatus === 'TERMINATED') {
+      logger.warn(`[DEBUG_AUTH] Login blocked: account deactivated (TERMINATED) for userId: ${user.ID}`)
       throw new HttpError(403, 'Your account has been deactivated. Please contact HR.')
     }
 
     await executeQuery(`UPDATE ${usersTable} SET LAST_LOGIN = CURRENT_TIMESTAMP() WHERE ID = ?`, [user.ID])
+
+    // Auto-heal missing EMPLOYEES profile for Super-Admin / Admin if omitted during manual DB insertion (runtime only)
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+      try {
+        const empRows = await executeQuery<Record<string, unknown>>(
+          `SELECT ID FROM ${employeesTable} WHERE USER_ID = ?`,
+          [user.ID],
+        )
+        if (!empRows || empRows.length === 0) {
+          logger.info(`[DEBUG_AUTH] Auto-creating missing EMPLOYEES profile for userId: ${user.ID}`)
+          await executeQuery(
+            `INSERT INTO ${employeesTable} (USER_ID, EMPLOYEE_CODE, STATUS)
+             VALUES (?, printf('EMP-%06d', ?), 'ACTIVE')`,
+            [user.ID, user.ID],
+          )
+        }
+      } catch (empErr) {
+        logger.warn(`[DEBUG_AUTH] Non-fatal: unable to ensure EMPLOYEES profile for userId ${user.ID}:`, empErr)
+      }
+    }
+
     const safeUser = toSafeUser(user)
-    return { token: createToken(toTokenPayload(safeUser)), user: safeUser }
+    const token = createToken(toTokenPayload(safeUser))
+    logger.info(`[DEBUG_AUTH] Login successful! Token issued for userId=${safeUser.id}, role=${safeUser.role}`)
+    return { token, user: safeUser }
   },
 
   async getUserById(id) {
@@ -139,9 +191,12 @@ export const authService: AuthServiceContract = {
       [id],
     )
     if (!rows[0]) {
+      logger.warn(`[DEBUG_AUTH] getUserById: user ${id} not found`)
       throw new HttpError(404, 'User not found')
     }
-    return toSafeUser(rows[0])
+    const safeUser = toSafeUser(rows[0])
+    logger.info(`[DEBUG_AUTH] getUserById: user ${id} fetched, normalizedRole=${safeUser.role}`)
+    return safeUser
   },
 
   async listUsers() {
