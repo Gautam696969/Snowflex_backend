@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express'
 import { employeeService } from '../services/employee.service'
 import { HttpError } from '../utils/http-error'
 import { sendSuccess } from '../utils/apiResponse'
+import { normalizeRole } from '../utils/roles'
 
 const broadRoles = ['ADMIN', 'SUPER_ADMIN', 'HR']
 
@@ -9,9 +10,10 @@ export const employeeController = {
   async list(request: Request, response: Response, next: NextFunction) {
     try {
       const status = typeof request.query.status === 'string' ? request.query.status : 'ACTIVE'
-      const users = broadRoles.includes(request.user!.role)
+      const userRole = normalizeRole(request.user!.role)
+      const users = broadRoles.includes(userRole)
         ? await employeeService.list(status)
-        : request.user!.role === 'MANAGER'
+        : userRole === 'MANAGER'
           ? await employeeService.teamForUser(request.user!.id)
           : [await employeeService.forUser(request.user!.id)]
       sendSuccess(response, 200, 'Employees fetched successfully', users)
@@ -48,8 +50,9 @@ export const employeeController = {
     try {
       const id = Number(request.params.id)
       const employee = await employeeService.get(id)
-      if (!broadRoles.includes(request.user!.role)) {
-        const visible = request.user!.role === 'MANAGER'
+      const userRole = normalizeRole(request.user!.role)
+      if (!broadRoles.includes(userRole)) {
+        const visible = userRole === 'MANAGER'
           ? (await employeeService.teamForUser(request.user!.id)).some((person) => Number(person.id) === id)
           : Number(employee.userId) === request.user!.id
         if (!visible) throw new HttpError(403, 'Forbidden')

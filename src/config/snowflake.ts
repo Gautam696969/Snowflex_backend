@@ -23,9 +23,9 @@ interface D1ApiResponse<T> {
 }
 
 function getCredentials(): { accountId: string; databaseId: string; apiToken: string } {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID?.trim()
-  const databaseId = process.env.CLOUDFLARE_DATABASE_ID?.trim()
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN?.trim()
+  const accountId = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim()
+  const databaseId = (process.env.CLOUDFLARE_DATABASE_ID || '').trim()
+  const apiToken = (process.env.CLOUDFLARE_API_TOKEN || '').trim()
 
   if (!accountId || !databaseId || !apiToken) {
     throw new Error('Cloudflare D1 configuration is incomplete. Check CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, and CLOUDFLARE_API_TOKEN in .env')

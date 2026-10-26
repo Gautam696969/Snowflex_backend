@@ -3,6 +3,7 @@ import { attendanceService } from '../services/attendance.service'
 import { employeeService } from '../services/employee.service'
 import { HttpError } from '../utils/http-error'
 import { sendSuccess } from '../utils/apiResponse'
+import { normalizeRole } from '../utils/roles'
 
 export const attendanceController = {
   async checkIn(request: Request, response: Response, next: NextFunction) {
@@ -13,14 +14,24 @@ export const attendanceController = {
   },
   async mine(request: Request, response: Response, next: NextFunction) {
     try {
-      const employee = await employeeService.forUser(request.user!.id)
+      const userRole = normalizeRole(request.user!.role)
+      let employee: Record<string, unknown> | null = null
+      try {
+        employee = await employeeService.forUser(request.user!.id)
+      } catch (err) {
+        if (['SUPER_ADMIN', 'ADMIN'].includes(userRole)) {
+          sendSuccess(response, 200, 'Attendance fetched successfully', [])
+          return
+        }
+        throw err
+      }
       sendSuccess(response, 200, 'Attendance fetched successfully', await attendanceService.listForEmployee(Number(employee.id)))
     } catch (error) { next(error) }
   },
   async byEmployee(request: Request, response: Response, next: NextFunction) {
     try {
       const employeeId = Number(request.params.employeeId)
-      const role = request.user!.role
+      const role = normalizeRole(request.user!.role)
       if (!['ADMIN', 'SUPER_ADMIN', 'HR'].includes(role)) {
         const employee = await employeeService.get(employeeId)
         const own = Number(employee.userId) === request.user!.id
@@ -32,7 +43,8 @@ export const attendanceController = {
   },
   async list(request: Request, response: Response, next: NextFunction) {
     try {
-      const rows = request.user!.role === 'MANAGER'
+      const role = normalizeRole(request.user!.role)
+      const rows = role === 'MANAGER'
         ? await attendanceService.listForManager(request.user!.id)
         : await attendanceService.listAll()
       sendSuccess(response, 200, 'Attendance fetched successfully', rows)

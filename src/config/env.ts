@@ -3,9 +3,9 @@ import { z } from 'zod'
 
 const environmentSchema = z.object({
   PORT: z.coerce.number().int().positive().default(5000),
-  CLOUDFLARE_ACCOUNT_ID: z.string().min(1, 'CLOUDFLARE_ACCOUNT_ID is required'),
-  CLOUDFLARE_DATABASE_ID: z.string().min(1, 'CLOUDFLARE_DATABASE_ID is required'),
-  CLOUDFLARE_API_TOKEN: z.string().min(1, 'CLOUDFLARE_API_TOKEN is required'),
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional().default(''),
+  CLOUDFLARE_DATABASE_ID: z.string().optional().default(''),
+  CLOUDFLARE_API_TOKEN: z.string().optional().default(''),
   SNOWFLAKE_ACCOUNT: z.string().optional(),
   SNOWFLAKE_USERNAME: z.string().optional(),
   SNOWFLAKE_PASSWORD: z.string().optional(),
