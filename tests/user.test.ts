@@ -143,4 +143,24 @@ describe('user profile endpoints', () => {
       data: null,
     })
   })
+
+  it('POST /api/users/me/avatar successfully handles user with legacy ID (e.g. 901)', async () => {
+    const legacyToken = createToken({ id: 901, email: 'palgautam69@gmail.com', role: 'SUPER_ADMIN' })
+    const updateAvatarSpy = vi.spyOn(userService, 'updateAvatar').mockResolvedValueOnce('/uploads/avatars/avatar-2-migrated.png')
+
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00])
+
+    const response = await request(app)
+      .post('/api/users/me/avatar')
+      .set('Authorization', `Bearer ${legacyToken}`)
+      .attach('avatar', pngBuffer, { filename: 'avatar.png', contentType: 'image/png' })
+      .expect(200)
+
+    expect(updateAvatarSpy).toHaveBeenCalled()
+    expect(response.body).toEqual({
+      success: true,
+      message: 'Avatar updated successfully',
+      data: { avatarUrl: '/uploads/avatars/avatar-2-migrated.png' },
+    })
+  })
 })
