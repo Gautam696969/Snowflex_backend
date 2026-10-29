@@ -34,12 +34,31 @@ export const dashboardService = {
   },
   async employee(userId: number): Promise<Record<string, unknown>> {
     const employee = await executeQuery<DbRow>(`SELECT ID FROM ${employeesTable} WHERE USER_ID = ?`, [userId])
-    if (!employee[0]) throw new HttpError(404, 'Employee profile not found')
+    if (!employee[0]) throw new HttpError(403, 'Employee profile not linked to this user')
+    return this.employeeByEmployeeId(Number(employee[0].ID))
+  },
+  async employeeByEmployeeId(employeeId: number): Promise<Record<string, unknown>> {
     return one(`SELECT
       (SELECT COUNT(*) FROM ${attendanceTable} WHERE EMPLOYEE_ID = ? AND ATTENDANCE_DATE >= DATE_TRUNC('MONTH', CURRENT_DATE())) AS ATTENDANCE_THIS_MONTH,
       (SELECT COALESCE(SUM(DEFAULT_DAYS), 0) FROM ${leaveTypesTable}) - COALESCE((SELECT SUM(TOTAL_DAYS) FROM ${leavesTable} WHERE EMPLOYEE_ID = ? AND STATUS = 'APPROVED'), 0) AS LEAVE_BALANCE,
       (SELECT COUNT(*) FROM ${leavesTable} WHERE EMPLOYEE_ID = ? AND STATUS = 'PENDING') AS PENDING_LEAVES,
       (SELECT COUNT(*) FROM ${tasksTable} WHERE ASSIGNED_TO = ? AND STATUS IN ('TODO','IN_PROGRESS')) AS ASSIGNED_TASKS,
-      (SELECT COUNT(*) FROM ${tasksTable} WHERE ASSIGNED_TO = ? AND STATUS = 'COMPLETED') AS COMPLETED_TASKS`, [Number(employee[0].ID), Number(employee[0].ID), Number(employee[0].ID), Number(employee[0].ID), Number(employee[0].ID)])
+      (SELECT COUNT(*) FROM ${tasksTable} WHERE ASSIGNED_TO = ? AND STATUS = 'COMPLETED') AS COMPLETED_TASKS`, [employeeId, employeeId, employeeId, employeeId, employeeId])
+  },
+  async findEmployee(id: number): Promise<DbRow | null> {
+    const rows = await executeQuery<DbRow>(
+      `SELECT ID, USER_ID, MANAGER_ID FROM ${employeesTable} WHERE ID = ? OR USER_ID = ? ORDER BY CASE WHEN ID = ? THEN 0 ELSE 1 END ASC LIMIT 1`,
+      [id, id, id]
+    )
+    return rows[0] ?? null
+  },
+  async isTeamMember(managerUserId: number, employeeId: number): Promise<boolean> {
+    const manager = await executeQuery<DbRow>(`SELECT ID FROM ${employeesTable} WHERE USER_ID = ?`, [managerUserId])
+    if (!manager[0]) return false
+    const rows = await executeQuery<DbRow>(
+      `SELECT ID FROM ${employeesTable} WHERE ID = ? AND MANAGER_ID = ?`,
+      [employeeId, Number(manager[0].ID)]
+    )
+    return Boolean(rows[0])
   },
 }

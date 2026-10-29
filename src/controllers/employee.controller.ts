@@ -55,7 +55,7 @@ export const employeeController = {
         const visible = userRole === 'MANAGER'
           ? (await employeeService.teamForUser(request.user!.id)).some((person) => Number(person.id) === id)
           : Number(employee.userId) === request.user!.id
-        if (!visible) throw new HttpError(403, 'Forbidden')
+        if (!visible) throw new HttpError(403, "Role not allowed: you cannot view other employees' records")
       }
       sendSuccess(response, 200, 'Employee fetched successfully', employee)
     } catch (error) { next(error) }
