@@ -53,7 +53,8 @@ export function createApp(service?: AuthServiceContract): Express {
       maxAge: 86400,
     }),
   )
-  app.use(express.json({ limit: '32kb' }))
+  app.use(express.json({ limit: '25mb' }))
+  app.use(express.urlencoded({ limit: '25mb', extended: true }))
 
   const uploadsDir = path.resolve(process.cwd(), 'uploads')
   if (!fs.existsSync(uploadsDir)) {

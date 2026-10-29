@@ -45,7 +45,7 @@ export const errorHandler: ErrorRequestHandler = (error, request, response, _nex
   }
 
   if (error?.code === 'LIMIT_FILE_SIZE') {
-    sendError(response, 413, 'Audio file is too large. Maximum size is 10 MB.')
+    sendError(response, 413, 'Audio file is too large. Maximum size is 25 MB.')
     return
   }
 
