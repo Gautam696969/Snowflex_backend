@@ -2,6 +2,7 @@ import { Response } from 'express'
 import { executeInsert, executeQuery, executeUpdate } from '../config/snowflake'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
 import { normalizeRole } from '../utils/roles'
+import { webpushService } from './webpush.service'
 
 const notificationsTable = snowflakeTable('NOTIFICATIONS')
 const usersTable = snowflakeTable('USERS')
@@ -136,6 +137,17 @@ export const notificationService = {
     } catch {
       // non-blocking
     }
+
+    // Dispatch Native Android Web Push notification if user has installed PWA
+    webpushService
+      .sendToUser(input.userId, {
+        title: input.title,
+        body: input.message,
+        url: input.link ?? undefined,
+        type: input.type,
+        relatedId: input.relatedId ?? undefined,
+      })
+      .catch(() => {})
 
     return notification
   },
