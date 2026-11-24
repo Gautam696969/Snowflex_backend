@@ -205,7 +205,7 @@ export const notificationService = {
 
   async notifyAdmins(input: Omit<CreateNotificationInput, 'userId'>): Promise<void> {
     const adminRows = await executeQuery<Record<string, unknown>>(
-      `SELECT ID FROM ${usersTable} WHERE REGEXP_REPLACE(UPPER(TRIM(ROLE)), '[[:space:]-]+', '_') = 'ADMIN'`,
+      `SELECT ID FROM ${usersTable} WHERE REGEXP_REPLACE(UPPER(TRIM(ROLE)), '[[:space:]-]+', '_') IN ('ADMIN', 'SUPER_ADMIN')`,
     )
 
     for (const admin of adminRows) {
@@ -219,6 +219,10 @@ export const notificationService = {
         })
       }
     }
+  },
+
+  async notifyAdminsAndSuperAdmins(input: Omit<CreateNotificationInput, 'userId'>): Promise<void> {
+    return this.notifyAdmins(input)
   },
 
   async notifyLeaveReviewers(

@@ -6,12 +6,33 @@ import { sendSuccess } from '../utils/apiResponse'
 import { normalizeRole } from '../utils/roles'
 
 export const attendanceController = {
+  async today(request: Request, response: Response, next: NextFunction) {
+    try {
+      const status = await attendanceService.getTodayStatus(request.user!.id)
+      sendSuccess(response, 200, 'Today attendance fetched successfully', status)
+    } catch (error) {
+      next(error)
+    }
+  },
+
   async checkIn(request: Request, response: Response, next: NextFunction) {
-    try { sendSuccess(response, 201, 'Checked in successfully', await attendanceService.checkIn(request.user!.id)) } catch (error) { next(error) }
+    try {
+      const { photo } = (request.body || {}) as { photo?: string }
+      sendSuccess(response, 201, 'Checked in successfully', await attendanceService.checkIn(request.user!.id, photo))
+    } catch (error) {
+      next(error)
+    }
   },
+
   async checkOut(request: Request, response: Response, next: NextFunction) {
-    try { sendSuccess(response, 200, 'Checked out successfully', await attendanceService.checkOut(request.user!.id)) } catch (error) { next(error) }
+    try {
+      const { photo } = (request.body || {}) as { photo?: string }
+      sendSuccess(response, 200, 'Checked out successfully', await attendanceService.checkOut(request.user!.id, photo))
+    } catch (error) {
+      next(error)
+    }
   },
+
   async mine(request: Request, response: Response, next: NextFunction) {
     try {
       const userRole = normalizeRole(request.user!.role)
@@ -26,8 +47,11 @@ export const attendanceController = {
         throw err
       }
       sendSuccess(response, 200, 'Attendance fetched successfully', await attendanceService.listForEmployee(Number(employee.id)))
-    } catch (error) { next(error) }
+    } catch (error) {
+      next(error)
+    }
   },
+
   async byEmployee(request: Request, response: Response, next: NextFunction) {
     try {
       const employeeId = Number(request.params.employeeId)
@@ -39,8 +63,11 @@ export const attendanceController = {
         if (!own && !team) throw new HttpError(403, 'Forbidden')
       }
       sendSuccess(response, 200, 'Attendance fetched successfully', await attendanceService.listForEmployee(employeeId))
-    } catch (error) { next(error) }
+    } catch (error) {
+      next(error)
+    }
   },
+
   async list(request: Request, response: Response, next: NextFunction) {
     try {
       const role = normalizeRole(request.user!.role)
@@ -48,6 +75,8 @@ export const attendanceController = {
         ? await attendanceService.listForManager(request.user!.id)
         : await attendanceService.listAll()
       sendSuccess(response, 200, 'Attendance fetched successfully', rows)
-    } catch (error) { next(error) }
+    } catch (error) {
+      next(error)
+    }
   },
 }

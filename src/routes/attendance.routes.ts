@@ -9,6 +9,7 @@ const employeeIdSchema = z.object({ employeeId: z.coerce.number().int().positive
 
 export const attendanceRouter = Router()
 attendanceRouter.use(requireAuth)
+attendanceRouter.get('/today', attendanceController.today)
 attendanceRouter.post('/check-in', attendanceController.checkIn)
 attendanceRouter.post('/check-out', attendanceController.checkOut)
 attendanceRouter.get('/me', attendanceController.mine)
