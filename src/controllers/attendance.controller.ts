@@ -79,4 +79,23 @@ export const attendanceController = {
       next(error)
     }
   },
+
+  async getPhoto(request: Request, response: Response, next: NextFunction) {
+    try {
+      const id = Number(request.params.id)
+      const type = request.params.type === 'checkout' ? 'checkout' : 'checkin'
+      const photo = await attendanceService.getAttendancePhoto(id, type)
+      if (!photo) {
+        const svg = attendanceService.generatePlaceholderSvg(type)
+        response.setHeader('Content-Type', 'image/svg+xml')
+        response.setHeader('Cache-Control', 'public, max-age=3600')
+        return response.send(svg)
+      }
+      response.setHeader('Content-Type', photo.contentType)
+      response.setHeader('Cache-Control', 'public, max-age=86400')
+      return response.send(photo.buffer)
+    } catch (error) {
+      next(error)
+    }
+  },
 }

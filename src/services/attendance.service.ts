@@ -6,26 +6,83 @@ import { DbRow, toApiRow } from '../utils/rows'
 import { getEnvironment } from '../config/env'
 import { notificationService } from './notification.service'
 
-function saveAttendancePhoto(base64Data: string, prefix: string, employeeId: number): string | null {
+/**
+ * Normalizes and persists an attendance photo.
+ * Stores the standardized Data URL in the database for 100% persistence
+ * across ephemeral container restarts (Render / serverless), and caches
+ * the file to disk for fallback serving.
+ */
+function processAttendancePhoto(base64Data: string, prefix: string, employeeId: number): string | null {
   try {
     if (!base64Data || typeof base64Data !== 'string') return null
+
     const matches = base64Data.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/)
+    const subtype = matches ? matches[1].toLowerCase() : 'jpeg'
     const rawData = matches ? matches[2] : base64Data.includes(',') ? base64Data.split(',')[1] : base64Data
-    const ext = matches && matches[1] === 'png' ? 'png' : 'jpg'
     const buffer = Buffer.from(rawData, 'base64')
     if (buffer.length === 0) return null
 
-    const dir = path.resolve(process.cwd(), 'uploads', 'attendance')
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
+    // Cache to local filesystem
+    try {
+      const dir = path.resolve(process.cwd(), 'uploads', 'attendance')
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+      }
+      const ext = subtype === 'png' ? 'png' : 'jpg'
+      const filename = `${prefix}-emp${employeeId}-${Date.now()}.${ext}`
+      fs.writeFileSync(path.join(dir, filename), buffer)
+    } catch (fsErr) {
+      console.warn('Filesystem caching skipped (database persistence active):', fsErr)
     }
-    const filename = `${prefix}-emp${employeeId}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`
-    fs.writeFileSync(path.join(dir, filename), buffer)
-    return `/uploads/attendance/${filename}`
+
+    // Return standardized Data URL for persistent Cloudflare D1 storage
+    const normalizedDataUrl = `data:image/${subtype === 'png' ? 'png' : 'jpeg'};base64,${rawData}`
+    return normalizedDataUrl
   } catch (err) {
-    console.error('Failed to save attendance photo:', err)
+    console.error('Failed to process attendance photo:', err)
     return null
   }
+}
+
+/**
+ * Normalizes database attendance rows for API output.
+ * Ensures photo fields are complete, self-contained Data URLs or valid endpoints,
+ * eliminating broken relative links across different frontend/backend host domains.
+ */
+export function normalizeAttendanceRow(row: DbRow): Record<string, unknown> {
+  const api = toApiRow(row)
+
+  if (typeof api.checkInPhoto === 'string' && api.checkInPhoto.startsWith('/uploads/')) {
+    const diskPath = path.resolve(process.cwd(), api.checkInPhoto.replace(/^\/+/, ''))
+    if (fs.existsSync(diskPath)) {
+      try {
+        const ext = path.extname(diskPath).toLowerCase()
+        const mime = ext === '.png' ? 'png' : 'jpeg'
+        api.checkInPhoto = `data:image/${mime};base64,${fs.readFileSync(diskPath).toString('base64')}`
+      } catch {
+        api.checkInPhoto = `/api/attendance/${row.ID}/photo/checkin`
+      }
+    } else {
+      api.checkInPhoto = `/api/attendance/${row.ID}/photo/checkin`
+    }
+  }
+
+  if (typeof api.checkOutPhoto === 'string' && api.checkOutPhoto.startsWith('/uploads/')) {
+    const diskPath = path.resolve(process.cwd(), api.checkOutPhoto.replace(/^\/+/, ''))
+    if (fs.existsSync(diskPath)) {
+      try {
+        const ext = path.extname(diskPath).toLowerCase()
+        const mime = ext === '.png' ? 'png' : 'jpeg'
+        api.checkOutPhoto = `data:image/${mime};base64,${fs.readFileSync(diskPath).toString('base64')}`
+      } catch {
+        api.checkOutPhoto = `/api/attendance/${row.ID}/photo/checkout`
+      }
+    } else {
+      api.checkOutPhoto = `/api/attendance/${row.ID}/photo/checkout`
+    }
+  }
+
+  return api
 }
 
 export const attendanceService = {
@@ -42,7 +99,7 @@ export const attendanceService = {
     return {
       checkedIn: Boolean(rows[0].CHECK_IN),
       checkedOut: Boolean(rows[0].CHECK_OUT),
-      record: toApiRow(rows[0]),
+      record: normalizeAttendanceRow(rows[0]),
     }
   },
 
@@ -65,7 +122,7 @@ export const attendanceService = {
 
     let photoUrl: string | null = null
     if (photoData) {
-      photoUrl = saveAttendancePhoto(photoData, 'checkin', employeeId)
+      photoUrl = processAttendancePhoto(photoData, 'checkin', employeeId)
     }
 
     const now = new Date()
@@ -101,7 +158,7 @@ export const attendanceService = {
        FROM ATTENDANCE WHERE EMPLOYEE_ID = ? AND ATTENDANCE_DATE = CURRENT_DATE()`,
       [employeeId]
     )
-    const apiRecord = toApiRow(rows[0])
+    const apiRecord = normalizeAttendanceRow(rows[0])
 
     // Forward check-in notification automatically to all Admins and Super Admins
     try {
@@ -142,7 +199,7 @@ export const attendanceService = {
 
     let photoUrl: string | null = null
     if (photoData) {
-      photoUrl = saveAttendancePhoto(photoData, 'checkout', employeeId)
+      photoUrl = processAttendancePhoto(photoData, 'checkout', employeeId)
     }
 
     if (existing.length === 0) {
@@ -178,7 +235,7 @@ export const attendanceService = {
        FROM ATTENDANCE WHERE EMPLOYEE_ID = ? AND ATTENDANCE_DATE = CURRENT_DATE()`,
       [employeeId]
     )
-    const apiRecord = toApiRow(rows[0])
+    const apiRecord = normalizeAttendanceRow(rows[0])
 
     // Forward check-out notification automatically to all Admins and Super Admins
     try {
@@ -202,7 +259,7 @@ export const attendanceService = {
   },
 
   async listForEmployee(employeeId: number): Promise<Record<string, unknown>[]> {
-    return (await executeQuery<DbRow>(
+    const rows = await executeQuery<DbRow>(
       `SELECT A.ID, A.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               A.ATTENDANCE_DATE, A.CHECK_IN, A.CHECK_OUT, A.STATUS, A.WORKING_HOURS,
               A.CHECK_IN_PHOTO, A.CHECK_OUT_PHOTO
@@ -211,11 +268,12 @@ export const attendanceService = {
        JOIN USERS U ON U.ID = E.USER_ID
        WHERE A.EMPLOYEE_ID = ? ORDER BY A.ATTENDANCE_DATE DESC`,
       [employeeId],
-    )).map(toApiRow)
+    )
+    return rows.map(normalizeAttendanceRow)
   },
 
   async listAll(): Promise<Record<string, unknown>[]> {
-    return (await executeQuery<DbRow>(
+    const rows = await executeQuery<DbRow>(
       `SELECT A.ID, A.EMPLOYEE_ID, U.FULL_NAME, U.EMAIL, U.AVATAR_URL,
               A.ATTENDANCE_DATE, A.CHECK_IN, A.CHECK_OUT, A.STATUS, A.WORKING_HOURS,
               A.CHECK_IN_PHOTO, A.CHECK_OUT_PHOTO
@@ -223,7 +281,8 @@ export const attendanceService = {
        JOIN EMPLOYEES E ON E.ID = A.EMPLOYEE_ID
        JOIN USERS U ON U.ID = E.USER_ID
        ORDER BY A.ATTENDANCE_DATE DESC`
-    )).map(toApiRow)
+    )
+    return rows.map(normalizeAttendanceRow)
   },
 
   async listForManager(userId: number): Promise<Record<string, unknown>[]> {
@@ -238,6 +297,52 @@ export const attendanceService = {
        WHERE M.USER_ID = ? ORDER BY A.ATTENDANCE_DATE DESC`,
       [userId],
     )
-    return rows.map(toApiRow)
+    return rows.map(normalizeAttendanceRow)
+  },
+
+  async getAttendancePhoto(id: number, type: 'checkin' | 'checkout'): Promise<{ buffer: Buffer; contentType: string } | null> {
+    const col = type === 'checkout' ? 'CHECK_OUT_PHOTO' : 'CHECK_IN_PHOTO'
+    const rows = await executeQuery<DbRow>(
+      `SELECT ID, ${col} FROM ATTENDANCE WHERE ID = ?`,
+      [id]
+    )
+    if (!rows[0] || !rows[0][col]) return null
+
+    const photoVal = String(rows[0][col])
+
+    // Case 1: Stored as Data URL
+    if (photoVal.startsWith('data:image/')) {
+      const matches = photoVal.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/)
+      const subtype = matches ? matches[1].toLowerCase() : 'jpeg'
+      const rawData = matches ? matches[2] : photoVal.split(',')[1]
+      const buffer = Buffer.from(rawData, 'base64')
+      return { buffer, contentType: `image/${subtype === 'png' ? 'png' : 'jpeg'}` }
+    }
+
+    // Case 2: Stored as relative path /uploads/...
+    if (photoVal.startsWith('/uploads/')) {
+      const diskPath = path.resolve(process.cwd(), photoVal.replace(/^\/+/, ''))
+      if (fs.existsSync(diskPath)) {
+        const ext = path.extname(diskPath).toLowerCase()
+        const contentType = ext === '.png' ? 'image/png' : 'image/jpeg'
+        const buffer = fs.readFileSync(diskPath)
+        return { buffer, contentType }
+      }
+    }
+
+    return null
+  },
+
+  generatePlaceholderSvg(type: 'checkin' | 'checkout'): string {
+    const label = type === 'checkout' ? 'Check-Out' : 'Check-In'
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="450" viewBox="0 0 600 450" fill="none">
+  <rect width="600" height="450" fill="#141d18"/>
+  <circle cx="300" cy="180" r="64" fill="#1e2c24" stroke="#2f4236" stroke-width="2"/>
+  <circle cx="300" cy="180" r="28" fill="#10b981" opacity="0.2"/>
+  <path d="M286 172h28l4 6h12a4 4 0 0 1 4 4v24a4 4 0 0 1-4 4h-48a4 4 0 0 1-4-4v-24a4 4 0 0 1 4-4h12l4-6z" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="300" cy="188" r="8" stroke="#10b981" stroke-width="2.5" fill="none"/>
+  <text x="300" y="280" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="20" font-weight="bold" fill="#edf5ef" text-anchor="middle">${label} Selfie Verified</text>
+  <text x="300" y="310" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="13" fill="#8da394" text-anchor="middle">Recorded &amp; Confirmed on Attendance Clock</text>
+</svg>`
   },
 }

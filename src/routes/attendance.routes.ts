@@ -8,6 +8,10 @@ import { validateParams } from '../middleware/validation.middleware'
 const employeeIdSchema = z.object({ employeeId: z.coerce.number().int().positive() })
 
 export const attendanceRouter = Router()
+
+// Public photo endpoint for browser <img> tags and full-size preview
+attendanceRouter.get('/:id/photo/:type', attendanceController.getPhoto)
+
 attendanceRouter.use(requireAuth)
 attendanceRouter.get('/today', attendanceController.today)
 attendanceRouter.post('/check-in', attendanceController.checkIn)
