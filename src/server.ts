@@ -10,6 +10,7 @@ import http from 'node:http'
 import { initSocketServer } from './socket/socket.server'
 import { chatService } from './services/chat.service'
 import { callService } from './services/call.service'
+import { meetingService } from './services/meeting.service'
 import { ensureTerminationTables } from './services/user-status.service'
 import { holidayService } from './services/holiday.service'
 import { attendanceRequestService } from './services/attendance-request.service'
@@ -52,6 +53,10 @@ async function startServer(): Promise<void> {
     logger.warn('Could not ensure call log tables in Snowflake:', err)
   })
 
+  await meetingService.ensureTables().catch((err) => {
+    logger.warn('Could not ensure meeting tables in Snowflake:', err)
+  })
+
   await ensureTerminationTables().catch((err) => {
     logger.warn('Could not ensure termination tables in Snowflake:', err)
   })
@@ -66,7 +71,32 @@ async function startServer(): Promise<void> {
 
   const app = createApp()
   const httpServer = http.createServer(app)
-  initSocketServer(httpServer)
+  const io = initSocketServer(httpServer)
+
+  // Check scheduled meeting reminders (10m before) and missed meetings every 60s
+  const meetingScheduler = setInterval(() => {
+    void meetingService
+      .processScheduledRemindersAndMissed(
+        (meeting, recipientIds) => {
+          for (const uid of recipientIds) {
+            io.to(`user:${uid}`).emit('meeting:reminder', { meeting })
+          }
+        },
+        (meeting, msg) => {
+          if (meeting.chatId) {
+            const participants = Array.from(new Set([meeting.hostId, ...meeting.invitedUserIds]))
+            for (const uid of participants) {
+              io.to(`user:${uid}`).emit('message:new', msg)
+              io.to(`user:${uid}`).emit('conversation:updated', {
+                conversationId: meeting.chatId,
+                lastMessage: msg,
+              })
+            }
+          }
+        }
+      )
+      .catch(() => {})
+  }, 60_000)
 
   const server = httpServer.listen(env.PORT, () => {
     logger.success(`Server running on port ${env.PORT}`)
@@ -83,6 +113,7 @@ async function startServer(): Promise<void> {
 
   const shutdown = () => {
     logger.info('Shutting down server...')
+    clearInterval(meetingScheduler)
     server.close(() => {
       process.exit(0)
     })

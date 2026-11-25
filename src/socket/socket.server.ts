@@ -12,6 +12,8 @@ import { isAllowedOrigin } from '../config/cors'
 import { AttendanceRequestItem } from '../types/attendance-request.types'
 import { normalizeRole } from '../utils/roles'
 import { registerCallSignalingHandlers, handleUserCallDisconnect } from './callSignaling'
+import { registerMeetingSignalingHandlers, handleUserMeetingDisconnect } from './meetingSignaling'
+import type { MeetingRecord } from '../services/meeting.service'
 
 export interface ServerToClientEvents {
   'message:new': (message: ChatMessageItem) => void
@@ -57,6 +59,17 @@ export interface ServerToClientEvents {
     reason: 'ended' | 'rejected' | 'timeout' | 'busy' | 'disconnected'
     durationSeconds: number
   }) => void
+  'meeting:started': (data: { meeting: MeetingRecord }) => void
+  'meeting:reminder': (data: { meeting: MeetingRecord }) => void
+  'meeting:ended': (data: { meetingCode: string; endedByUserId: number; durationMinutes: number }) => void
+  'meeting:host-changed': (data: { meetingCode: string; newHostId: number }) => void
+  'meeting:screen-share-started': (data: { meetingCode: string; presenterUserId: number; presenterName: string }) => void
+  'meeting:screen-share-stopped': (data: { meetingCode: string; userId: number }) => void
+  'meeting:hand-raise': (data: { meetingCode: string; userId: number; fullName: string; raised: boolean }) => void
+  'meeting:reaction': (data: { meetingCode: string; userId: number; fullName: string; emoji: string }) => void
+  'meeting:muted-by-host': (data: { meetingCode: string; hostName: string }) => void
+  'meeting:removed-by-host': (data: { meetingCode: string; hostName: string }) => void
+  'meeting:screen-share-policy': (data: { meetingCode: string; allowScreenShare: boolean }) => void
 }
 
 export interface ClientToServerEvents {
@@ -75,6 +88,24 @@ export interface ClientToServerEvents {
   'call:answer': (payload: unknown) => void
   'call:ice-candidate': (payload: unknown) => void
   'call:end': (payload: unknown) => void
+  'meeting:join-room': (
+    payload: unknown,
+    ack?: (res: {
+      success: boolean
+      presenter?: { userId: number; fullName: string } | null
+      allowScreenShare?: boolean
+      raisedHands?: number[]
+      error?: string
+    }) => void
+  ) => void
+  'meeting:leave-room': (payload: unknown) => void
+  'meeting:screen-share-start': (payload: unknown, ack?: (res: { success: boolean; error?: string }) => void) => void
+  'meeting:screen-share-stop': (payload: unknown) => void
+  'meeting:hand-raise': (payload: unknown) => void
+  'meeting:reaction': (payload: unknown) => void
+  'meeting:host-mute': (payload: unknown) => void
+  'meeting:host-remove': (payload: unknown) => void
+  'meeting:host-screen-share-policy': (payload: unknown) => void
 }
 
 export interface InterServerEvents {}
@@ -289,12 +320,15 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
 
     // Register 1-to-1 WebRTC video call signaling events
     registerCallSignalingHandlers(io, socket)
+    // Register multi-party Meeting events & host controls
+    registerMeetingSignalingHandlers(io, socket)
 
     // Disconnect handler
     socket.on('disconnect', () => {
       const { isNowOffline, lastSeen } = presenceManager.removeConnection(userId, socket.id)
       if (isNowOffline) {
         void handleUserCallDisconnect(io, userId)
+        handleUserMeetingDisconnect(io, userId)
         io.emit('presence:update', {
           userId,
           isOnline: false,

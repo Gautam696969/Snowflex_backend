@@ -24,6 +24,7 @@ import { dashboardRouter } from './routes/dashboard.routes'
 import { userRouter } from './routes/user.routes'
 import { notificationRouter } from './routes/notification.routes'
 import { chatRouter } from './routes/chat.routes'
+import { meetingRouter } from './routes/meeting.routes'
 import { holidayRouter } from './routes/holiday.routes'
 import { themeRouter } from './routes/theme.routes'
 import { webpushRouter } from './routes/webpush.routes'
@@ -133,6 +134,9 @@ export function createApp(service?: AuthServiceContract): Express {
 
   app.use('/api/dashboard', dashboardRouter)
   app.use('/dashboard', dashboardRouter)
+
+  app.use('/api/meetings', meetingRouter)
+  app.use('/meetings', meetingRouter)
 
   app.use('/api/notifications', notificationRouter)
   app.use('/notifications', notificationRouter)
