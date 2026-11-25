@@ -83,7 +83,22 @@ export function buildMeetingCardMessageBody(meeting: {
   participantCount: number
   joinLink: string
 }): string {
-  return `[MEETING_CARD]${JSON.stringify(meeting)}`
+  const frontendBase = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '')
+  const fullUrl = frontendBase
+    ? `${frontendBase}/meeting/${meeting.meetingCode}`
+    : `/meeting/${meeting.meetingCode}`
+
+  if (meeting.status === 'SCHEDULED' && meeting.scheduledAt) {
+    const when = new Date(meeting.scheduledAt).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    return `📅 Scheduled Meeting: ${meeting.title} (${when})\nHost: ${meeting.hostName} • Join: ${fullUrl}`
+  }
+
+  return `🎥 ${meeting.title}\nHost: ${meeting.hostName} • Join: ${fullUrl}`
 }
 
 export const meetingService = {
@@ -332,15 +347,6 @@ export const meetingService = {
         }),
         clientMessageId: `meet-card-${meeting.meetingCode}`,
       })
-
-      if (!isScheduled) {
-        statusMessage = await this.postChatSystemMessage({
-          conversationId: validChatId,
-          senderId: input.hostId,
-          body: `🎥 Meeting started: ${meeting.title}`,
-          clientMessageId: `meet-start-${meeting.meetingCode}`,
-        })
-      }
     }
 
     const recipientUserIds = invitedList.filter((id) => id !== input.hostId)
