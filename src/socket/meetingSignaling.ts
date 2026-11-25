@@ -6,9 +6,10 @@ import type { ClientToServerEvents, InterServerEvents, ServerToClientEvents, Soc
 type TypedIO = SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
 
-// In-memory room coordination state (single presenter lock & raised hands)
+// In-memory room coordination state (single presenter lock, raised hands, and active members)
 const roomPresenters = new Map<string, { userId: number; fullName: string }>()
 const roomRaisedHands = new Map<string, Set<number>>()
+const roomMembers = new Map<string, Map<number, { userId: number; fullName: string }>>()
 const userActiveMeeting = new Map<number, string>()
 
 const meetingCodeSchema = z.object({
@@ -55,11 +56,22 @@ export function registerMeetingSignalingHandlers(io: TypedIO, socket: TypedSocke
       const presenter = roomPresenters.get(meetingCode) || null
       const raised = Array.from(roomRaisedHands.get(meetingCode) || [])
 
+      let members = roomMembers.get(meetingCode)
+      if (!members) {
+        members = new Map()
+        roomMembers.set(meetingCode, members)
+      }
+      const existingPeers = Array.from(members.values()).filter((m) => m.userId !== userId)
+      members.set(userId, { userId, fullName })
+
+      socket.to(room).emit('meeting:rtc-peer-joined', { meetingCode, userId, fullName })
+
       ack?.({
         success: true,
         presenter,
         allowScreenShare: meeting.allowScreenShare,
         raisedHands: raised,
+        peers: existingPeers,
       })
     } catch (err) {
       ack?.({ success: false, error: err instanceof Error ? err.message : 'Unable to join meeting room' })
@@ -76,6 +88,13 @@ export function registerMeetingSignalingHandlers(io: TypedIO, socket: TypedSocke
     if (userActiveMeeting.get(userId) === meetingCode) {
       userActiveMeeting.delete(userId)
     }
+
+    const members = roomMembers.get(meetingCode)
+    if (members?.has(userId)) {
+      members.delete(userId)
+      if (members.size === 0) roomMembers.delete(meetingCode)
+    }
+    io.to(room).emit('meeting:rtc-peer-left', { meetingCode, userId })
 
     const presenter = roomPresenters.get(meetingCode)
     if (presenter?.userId === userId) {
@@ -219,12 +238,63 @@ export function registerMeetingSignalingHandlers(io: TypedIO, socket: TypedSocke
       // ignore
     }
   })
+
+  // Built-in WebRTC Mesh fallback signaling (when LiveKit SFU env vars are not set)
+  socket.on('meeting:rtc-offer', (payload: unknown) => {
+    const p = payload as { meetingCode?: string; targetUserId?: number; sdp?: unknown }
+    if (!p?.meetingCode || !p?.targetUserId || !p?.sdp) return
+    io.to(`user:${p.targetUserId}`).emit('meeting:rtc-offer', {
+      meetingCode: p.meetingCode,
+      fromUserId: userId,
+      fromName: fullName,
+      sdp: p.sdp,
+    })
+  })
+
+  socket.on('meeting:rtc-answer', (payload: unknown) => {
+    const p = payload as { meetingCode?: string; targetUserId?: number; sdp?: unknown }
+    if (!p?.meetingCode || !p?.targetUserId || !p?.sdp) return
+    io.to(`user:${p.targetUserId}`).emit('meeting:rtc-answer', {
+      meetingCode: p.meetingCode,
+      fromUserId: userId,
+      sdp: p.sdp,
+    })
+  })
+
+  socket.on('meeting:rtc-ice', (payload: unknown) => {
+    const p = payload as { meetingCode?: string; targetUserId?: number; candidate?: unknown }
+    if (!p?.meetingCode || !p?.targetUserId || !p?.candidate) return
+    io.to(`user:${p.targetUserId}`).emit('meeting:rtc-ice', {
+      meetingCode: p.meetingCode,
+      fromUserId: userId,
+      candidate: p.candidate,
+    })
+  })
+
+  socket.on('meeting:rtc-media-state', (payload: unknown) => {
+    const p = payload as { meetingCode?: string; micMuted?: boolean; camOff?: boolean; screenSharing?: boolean }
+    if (!p?.meetingCode) return
+    socket.to(`meeting:${p.meetingCode}`).emit('meeting:rtc-media-state', {
+      meetingCode: p.meetingCode,
+      userId,
+      micMuted: Boolean(p.micMuted),
+      camOff: Boolean(p.camOff),
+      screenSharing: Boolean(p.screenSharing),
+    })
+  })
 }
 
 export function handleUserMeetingDisconnect(io: TypedIO, userId: number): void {
   const meetingCode = userActiveMeeting.get(userId)
   if (!meetingCode) return
   userActiveMeeting.delete(userId)
+
+  const members = roomMembers.get(meetingCode)
+  if (members?.has(userId)) {
+    members.delete(userId)
+    if (members.size === 0) roomMembers.delete(meetingCode)
+  }
+  io.to(`meeting:${meetingCode}`).emit('meeting:rtc-peer-left', { meetingCode, userId })
 
   const presenter = roomPresenters.get(meetingCode)
   if (presenter?.userId === userId) {

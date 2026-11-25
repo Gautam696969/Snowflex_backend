@@ -70,6 +70,18 @@ export interface ServerToClientEvents {
   'meeting:muted-by-host': (data: { meetingCode: string; hostName: string }) => void
   'meeting:removed-by-host': (data: { meetingCode: string; hostName: string }) => void
   'meeting:screen-share-policy': (data: { meetingCode: string; allowScreenShare: boolean }) => void
+  'meeting:rtc-peer-joined': (data: { meetingCode: string; userId: number; fullName: string }) => void
+  'meeting:rtc-peer-left': (data: { meetingCode: string; userId: number }) => void
+  'meeting:rtc-offer': (data: { meetingCode: string; fromUserId: number; fromName: string; sdp: unknown }) => void
+  'meeting:rtc-answer': (data: { meetingCode: string; fromUserId: number; sdp: unknown }) => void
+  'meeting:rtc-ice': (data: { meetingCode: string; fromUserId: number; candidate: unknown }) => void
+  'meeting:rtc-media-state': (data: {
+    meetingCode: string
+    userId: number
+    micMuted: boolean
+    camOff: boolean
+    screenSharing: boolean
+  }) => void
 }
 
 export interface ClientToServerEvents {
@@ -95,6 +107,7 @@ export interface ClientToServerEvents {
       presenter?: { userId: number; fullName: string } | null
       allowScreenShare?: boolean
       raisedHands?: number[]
+      peers?: Array<{ userId: number; fullName: string }>
       error?: string
     }) => void
   ) => void
@@ -106,6 +119,10 @@ export interface ClientToServerEvents {
   'meeting:host-mute': (payload: unknown) => void
   'meeting:host-remove': (payload: unknown) => void
   'meeting:host-screen-share-policy': (payload: unknown) => void
+  'meeting:rtc-offer': (payload: unknown) => void
+  'meeting:rtc-answer': (payload: unknown) => void
+  'meeting:rtc-ice': (payload: unknown) => void
+  'meeting:rtc-media-state': (payload: unknown) => void
 }
 
 export interface InterServerEvents {}
