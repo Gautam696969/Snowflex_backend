@@ -339,8 +339,14 @@ export const userService = {
       // Continue if the previous URL cannot be read.
     }
 
-    await fs.promises.writeFile(targetPath, fileBuffer)
-    const avatarUrl = `/uploads/avatars/${filename}`
+    // Best-effort local disk cache; primary permanent storage is Cloudflare D1 Data URL
+    try {
+      await fs.promises.writeFile(targetPath, fileBuffer)
+    } catch {
+      // Ignore if filesystem is read-only or ephemeral
+    }
+
+    const avatarUrl = `data:${detected.mime};base64,${fileBuffer.toString('base64')}`
 
     try {
       const changes = await executeUpdate(
