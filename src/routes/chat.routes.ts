@@ -22,3 +22,5 @@ chatRouter.post('/conversations', validateBody(createConversationSchema), chatCo
 chatRouter.get('/conversations/:id/messages', validateParams(conversationIdSchema), chatController.getMessages)
 chatRouter.post('/conversations/:id/read', validateParams(conversationIdSchema), chatController.markAsRead)
 chatRouter.get('/unread-count', chatController.getUnreadCount)
+chatRouter.get('/ice-servers', chatController.getIceServers)
+chatRouter.get('/calls', chatController.getCallLogs)

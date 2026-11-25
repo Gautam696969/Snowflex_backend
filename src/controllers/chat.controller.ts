@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { chatService } from '../services/chat.service'
+import { callService, getIceServersFromEnv } from '../services/call.service'
 import { sendSuccess } from '../utils/apiResponse'
 import { HttpError } from '../utils/http-error'
 import { getSocketServer } from '../socket/socket.server'
@@ -101,6 +102,27 @@ export const chatController = {
       if (!request.user) throw new HttpError(401, 'Unauthorized')
       const count = await chatService.getUnreadCount(request.user.id)
       sendSuccess(response, 200, 'Unread count fetched successfully', { count })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  getIceServers: async (request: Request, response: Response, next: NextFunction) => {
+    try {
+      if (!request.user) throw new HttpError(401, 'Unauthorized')
+      const iceServers = getIceServersFromEnv()
+      sendSuccess(response, 200, 'ICE servers fetched successfully', { iceServers })
+    } catch (error) {
+      next(error)
+    }
+  },
+
+  getCallLogs: async (request: Request, response: Response, next: NextFunction) => {
+    try {
+      if (!request.user) throw new HttpError(401, 'Unauthorized')
+      const limit = request.query.limit ? Number(request.query.limit) : 30
+      const logs = await callService.getCallLogsForUser(request.user.id, limit)
+      sendSuccess(response, 200, 'Call logs fetched successfully', logs)
     } catch (error) {
       next(error)
     }

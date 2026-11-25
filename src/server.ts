@@ -9,6 +9,7 @@ import { verifyMailSetup } from './services/email.service'
 import http from 'node:http'
 import { initSocketServer } from './socket/socket.server'
 import { chatService } from './services/chat.service'
+import { callService } from './services/call.service'
 import { ensureTerminationTables } from './services/user-status.service'
 import { holidayService } from './services/holiday.service'
 import { attendanceRequestService } from './services/attendance-request.service'
@@ -45,6 +46,10 @@ async function startServer(): Promise<void> {
 
   await chatService.ensureTables().catch((err) => {
     logger.warn('Could not ensure chat tables in Snowflake:', err)
+  })
+
+  await callService.ensureTables().catch((err) => {
+    logger.warn('Could not ensure call log tables in Snowflake:', err)
   })
 
   await ensureTerminationTables().catch((err) => {

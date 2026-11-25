@@ -11,6 +11,7 @@ import { ChatMessageItem } from '../services/chat.service'
 import { isAllowedOrigin } from '../config/cors'
 import { AttendanceRequestItem } from '../types/attendance-request.types'
 import { normalizeRole } from '../utils/roles'
+import { registerCallSignalingHandlers, handleUserCallDisconnect } from './callSignaling'
 
 export interface ServerToClientEvents {
   'message:new': (message: ChatMessageItem) => void
@@ -36,6 +37,26 @@ export interface ServerToClientEvents {
     rejectReason?: string | null
     request?: AttendanceRequestItem
   }) => void
+  'call:incoming': (data: {
+    callId: string
+    conversationId: number
+    caller: { id: number; fullName: string; role: string; avatarUrl: string | null }
+  }) => void
+  'call:accepted': (data: { callId: string; conversationId: number; acceptedByUserId: number }) => void
+  'call:rejected': (data: { callId: string; reason: string }) => void
+  'call:offer': (data: { callId: string; fromUserId: number; sdp: { type: string; sdp?: string } }) => void
+  'call:answer': (data: { callId: string; fromUserId: number; sdp: { type: string; sdp?: string } }) => void
+  'call:ice-candidate': (data: {
+    callId: string
+    fromUserId: number
+    candidate: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null; usernameFragment?: string | null }
+  }) => void
+  'call:ended': (data: {
+    callId: string
+    conversationId: number
+    reason: 'ended' | 'rejected' | 'timeout' | 'busy' | 'disconnected'
+    durationSeconds: number
+  }) => void
 }
 
 export interface ClientToServerEvents {
@@ -44,6 +65,16 @@ export interface ClientToServerEvents {
   'message:read': (payload: { conversationId: number; recipientId: number }) => void
   'typing:start': (payload: { conversationId: number; recipientId: number }) => void
   'typing:stop': (payload: { conversationId: number; recipientId: number }) => void
+  'call:request': (
+    payload: unknown,
+    ack?: (response: { success: boolean; callId?: string; conversationId?: number; status?: string; error?: string }) => void
+  ) => void
+  'call:accept': (payload: unknown, ack?: (response: { success: boolean; error?: string }) => void) => void
+  'call:reject': (payload: unknown) => void
+  'call:offer': (payload: unknown) => void
+  'call:answer': (payload: unknown) => void
+  'call:ice-candidate': (payload: unknown) => void
+  'call:end': (payload: unknown) => void
 }
 
 export interface InterServerEvents {}
@@ -256,10 +287,14 @@ export function initSocketServer(httpServer: HttpServer): SocketIOServer<ClientT
       }
     })
 
+    // Register 1-to-1 WebRTC video call signaling events
+    registerCallSignalingHandlers(io, socket)
+
     // Disconnect handler
     socket.on('disconnect', () => {
       const { isNowOffline, lastSeen } = presenceManager.removeConnection(userId, socket.id)
       if (isNowOffline) {
+        void handleUserCallDisconnect(io, userId)
         io.emit('presence:update', {
           userId,
           isOnline: false,
