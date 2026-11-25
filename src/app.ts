@@ -69,11 +69,9 @@ export function createApp(service?: AuthServiceContract): Express {
   app.use('/auth', authLimiter)
 
   const handleHealth = (_request: express.Request, response: express.Response) => {
-    const database = isSnowflakeConnected() || service ? 'connected' : 'disconnected'
-    response.status(database === 'connected' ? 200 : 503).json({
-      success: database === 'connected',
-      message: database === 'connected' ? 'API is healthy' : 'Database unavailable',
-      database,
+    response.status(200).json({
+      status: 'ok',
+      time: Date.now(),
     })
   }
 

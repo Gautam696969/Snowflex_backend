@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { executeQuery } from '../config/snowflake'
 import { HttpError } from '../utils/http-error'
-import { AuthenticatedUser, createToken } from '../utils/jwt'
+import { AuthenticatedUser, createRefreshToken, createToken, verifyRefreshToken } from '../utils/jwt'
 import { logger } from '../utils/logger'
 import { comparePassword, hashPassword } from '../utils/password'
 import { snowflakeTable } from '../utils/snowflake-identifiers'
@@ -11,6 +11,34 @@ import { normalizeRole } from '../utils/roles'
 const usersTable = snowflakeTable('USERS')
 const employeesTable = snowflakeTable('EMPLOYEES')
 const passwordResetTokensTable = snowflakeTable('PASSWORD_RESET_TOKENS')
+const refreshTokensTable = snowflakeTable('REFRESH_TOKENS')
+
+let ensureRefreshTablePromise: Promise<void> | null = null
+async function ensureRefreshTokensTable(): Promise<void> {
+  if (!ensureRefreshTablePromise) {
+    ensureRefreshTablePromise = (async () => {
+      try {
+        await executeQuery(`
+          CREATE TABLE IF NOT EXISTS ${refreshTokensTable} (
+            ID INTEGER AUTOINCREMENT START 1 INCREMENT 1,
+            USER_ID INTEGER NOT NULL,
+            TOKEN_HASH VARCHAR(128) NOT NULL,
+            EXPIRES_AT TIMESTAMP_NTZ NOT NULL,
+            REVOKED BOOLEAN DEFAULT FALSE,
+            CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+          )
+        `)
+      } catch (err) {
+        logger.warn('Could not ensure REFRESH_TOKENS table:', err)
+      }
+    })()
+  }
+  return ensureRefreshTablePromise
+}
+
+function hashToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken).digest('hex')
+}
 
 interface ResetTokenMemoryRecord {
   userId: number
@@ -57,6 +85,7 @@ interface UserRow {
 
 export interface LoginResult {
   token: string
+  refreshToken?: string
   user: AuthenticatedUser
 }
 
@@ -67,6 +96,8 @@ export interface AuthServiceContract {
   listUsers(): Promise<AuthenticatedUser[]>
   forgotPassword(email: string, origin?: string): Promise<void>
   resetPassword(token: string, newPassword: string): Promise<void>
+  refreshSession?(refreshToken: string): Promise<LoginResult>
+  revokeRefreshToken?(refreshToken: string): Promise<void>
 }
 
 import { getUserStatus } from './user-status.service'
@@ -183,8 +214,78 @@ export const authService: AuthServiceContract = {
 
     const safeUser = toSafeUser(user)
     const token = createToken(toTokenPayload(safeUser))
+    const refreshToken = createRefreshToken(toTokenPayload(safeUser))
+
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+      await ensureRefreshTokensTable()
+      const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
+      await executeQuery(
+        `INSERT INTO ${refreshTokensTable} (USER_ID, TOKEN_HASH, EXPIRES_AT, REVOKED)
+         VALUES (?, ?, ?, FALSE)`,
+        [safeUser.id, hashToken(refreshToken), expiresAt]
+      ).catch((err) => logger.warn('Failed to persist refresh token:', err))
+    }
+
     logger.info(`[DEBUG_AUTH] Login successful! Token issued for userId=${safeUser.id}, role=${safeUser.role}`)
-    return { token, user: safeUser }
+    return { token, refreshToken, user: safeUser }
+  },
+
+  async refreshSession(rawRefreshToken: string) {
+    if (!rawRefreshToken) {
+      throw new HttpError(401, 'Refresh token required')
+    }
+
+    let decoded
+    try {
+      decoded = verifyRefreshToken(rawRefreshToken)
+    } catch {
+      throw new HttpError(401, 'Refresh token expired or invalid')
+    }
+
+    await ensureRefreshTokensTable()
+    const tokenHash = hashToken(rawRefreshToken)
+    const rows = await executeQuery<Record<string, unknown>>(
+      `SELECT ID, REVOKED, EXPIRES_AT FROM ${refreshTokensTable} WHERE TOKEN_HASH = ? AND USER_ID = ? LIMIT 1`,
+      [tokenHash, decoded.id]
+    ).catch(() => [])
+
+    if (rows[0]) {
+      if (Boolean(rows[0].REVOKED)) {
+        throw new HttpError(401, 'Refresh token has been revoked')
+      }
+      const expMs = new Date(String(rows[0].EXPIRES_AT)).getTime()
+      if (!isNaN(expMs) && expMs < Date.now()) {
+        throw new HttpError(401, 'Refresh token expired')
+      }
+    }
+
+    const freshUser = await this.getUserById(decoded.id)
+    const newAccessToken = createToken(toTokenPayload(freshUser))
+    const newRefreshToken = createRefreshToken(toTokenPayload(freshUser))
+
+    // Rotate refresh token
+    if (rows[0]) {
+      await executeQuery(`UPDATE ${refreshTokensTable} SET REVOKED = TRUE WHERE ID = ?`, [
+        Number(rows[0].ID),
+      ]).catch(() => {})
+    }
+    const nextExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)
+    await executeQuery(
+      `INSERT INTO ${refreshTokensTable} (USER_ID, TOKEN_HASH, EXPIRES_AT, REVOKED)
+       VALUES (?, ?, ?, FALSE)`,
+      [freshUser.id, hashToken(newRefreshToken), nextExpiresAt]
+    ).catch(() => {})
+
+    return { token: newAccessToken, refreshToken: newRefreshToken, user: freshUser }
+  },
+
+  async revokeRefreshToken(rawRefreshToken: string) {
+    if (!rawRefreshToken) return
+    await ensureRefreshTokensTable()
+    await executeQuery(
+      `UPDATE ${refreshTokensTable} SET REVOKED = TRUE WHERE TOKEN_HASH = ?`,
+      [hashToken(rawRefreshToken)]
+    ).catch(() => {})
   },
 
   async getUserById(id) {

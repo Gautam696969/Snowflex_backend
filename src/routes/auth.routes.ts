@@ -40,6 +40,8 @@ export function createAuthRouter(service?: AuthServiceContract): Router {
     controller.login,
   )
 
+  router.post('/refresh', controller.refresh)
+
   router.post(
     '/forgot-password',
     validateBody(forgotPasswordSchema),

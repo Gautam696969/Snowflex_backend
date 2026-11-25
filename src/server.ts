@@ -11,6 +11,7 @@ import { initSocketServer } from './socket/socket.server'
 import { chatService } from './services/chat.service'
 import { callService } from './services/call.service'
 import { meetingService } from './services/meeting.service'
+import { shiftReminderService } from './services/shift-reminder.service'
 import { ensureTerminationTables } from './services/user-status.service'
 import { holidayService } from './services/holiday.service'
 import { attendanceRequestService } from './services/attendance-request.service'
@@ -57,6 +58,10 @@ async function startServer(): Promise<void> {
     logger.warn('Could not ensure meeting tables in Snowflake:', err)
   })
 
+  await shiftReminderService.ensureTables().catch((err) => {
+    logger.warn('Could not ensure shift reminder table in Snowflake:', err)
+  })
+
   await ensureTerminationTables().catch((err) => {
     logger.warn('Could not ensure termination tables in Snowflake:', err)
   })
@@ -98,6 +103,11 @@ async function startServer(): Promise<void> {
       .catch(() => {})
   }, 60_000)
 
+  // Check shift check-in / check-out push reminders every minute (Asia/Kolkata)
+  const shiftReminderInterval = setInterval(() => {
+    void shiftReminderService.runTick().catch(() => {})
+  }, 60_000)
+
   const server = httpServer.listen(env.PORT, () => {
     logger.success(`Server running on port ${env.PORT}`)
   })
@@ -114,6 +124,7 @@ async function startServer(): Promise<void> {
   const shutdown = () => {
     logger.info('Shutting down server...')
     clearInterval(meetingScheduler)
+    clearInterval(shiftReminderInterval)
     server.close(() => {
       process.exit(0)
     })
