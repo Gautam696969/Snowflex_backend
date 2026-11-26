@@ -77,16 +77,26 @@ function getScriptedDemoReply(message: string): string {
   if (q.includes('price') || q.includes('pricing') || q.includes('cost') || q.includes('free') || q.includes('signup')) {
     return 'You can create a free workspace right now to test all features with your team! Click "Start your free trial" whenever you\'re ready. 🚀'
   }
+  if (q.includes('theme') || q.includes('dark') || q.includes('light') || q.includes('mode')) {
+    return hinglish
+      ? 'Snowflex dark aur light dono modes support karta hai — aap kabhi bhi theme toggle se switch kar sakte hain! 🌗'
+      : 'Snowflex supports both dark and light modes seamlessly — you can switch anytime from the theme toggle! 🌗'
+  }
   if (/^(hi|hii|hello|hey|namaste)\b/i.test(q.trim())) {
     return hinglish
       ? 'Hii! 👋 Main Snowflex AI hoon. Attendance, shifts, leave ya reports ke baare me kuch bhi poochho!'
       : 'Hey there! 👋 Ask me about today\'s attendance, who is on leave, shift reminders, or Snowflex features!'
   }
   if (q.includes('thank') || q.includes('thanks') || q.includes('shukriya')) {
-    return "You're welcome! 😊 Let me know if you'd like to explore anything else or start your free trial."
+    return hinglish
+      ? 'Most welcome! 😊 Kuch aur puchhna ho to zarur batayein.'
+      : "You're welcome! 😊 Let me know if you'd like to explore anything else or start your free trial."
   }
 
-  return 'I can help with Snowflex attendance, shifts, leave summaries, and reminders! 😊 Try tapping one of the quick questions like "Who is on leave today?" or "Show today\'s attendance".'
+  const topicPreview = message.trim().slice(0, 45)
+  return hinglish
+    ? `"${topicPreview}" ke baare me: Snowflex AI aapki team ki attendance, shifts, leave aur live chat ko automate karta hai (demo mode). ✨ Attendance, shift ya leave ke baare me puchh kar dekhein!`
+    : `Great question about "${topicPreview}"! Snowflex helps teams automate attendance, shift reminders, leave approvals, and live collaboration (demo mode). ✨ Try asking about attendance, shifts, leaves, or video meetings!`
 }
 
 export const publicAiRouter = Router()
@@ -177,3 +187,4 @@ publicAiRouter.post('/ai-demo', publicDemoLimiter, async (req: Request, res: Res
     data: { reply: fallbackReply, source: 'demo-script' },
   })
 })
+
