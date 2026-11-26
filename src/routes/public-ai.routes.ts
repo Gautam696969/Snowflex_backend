@@ -35,7 +35,15 @@ const publicDemoLimiter = rateLimit({
   },
 })
 
-const DEMO_SYSTEM_PROMPT = `You are Snowflex AI, the friendly assistant of Snowflex employee management software. Answer only about Snowflex features (attendance, shifts, leave, reports, notifications, team chat & meetings), using clearly labeled sample (demo data). Keep replies under 60 words, friendly and slightly casual with 1-2 emojis. Reply in Hinglish if the user writes in Hinglish. Politely decline unrelated topics and invite the user to sign up.`
+const DEMO_SYSTEM_PROMPT = `You are Snowflex AI, the friendly assistant of Snowflex employee management software. Answer only about Snowflex features:
+- Selfie Attendance (verified photo check-in/out, late tracking)
+- Shift Management & 5-min Push Reminders
+- Leave Requests & Approvals
+- Reports & Analytics
+- Live Team Chat (real-time 1-on-1 & group messaging, online status, meeting cards)
+- 1-on-1 HD Video Calls (incoming call ring, accept/decline, mic/cam toggles)
+- Group Video Meetings (instant/scheduled rooms, shareable join links, live screen sharing, raise hand, reactions, host End-for-All)
+Use clearly labeled sample (demo data) when showing numbers. Keep replies under 60 words, friendly and slightly casual with 1-2 emojis. Reply in Hinglish if the user writes in Hinglish. Politely decline unrelated topics and invite the user to sign up.`
 
 function isHinglish(text: string): boolean {
   return /\b(kya|hai|kaun|chutti|aaj|kal|mera|meri|batao|bata|kaise|kitne|haan|nahi|bhai|yaar|karo|hoga)\b/i.test(
@@ -71,8 +79,25 @@ function getScriptedDemoReply(message: string): string {
   if (q.includes('notification') || q.includes('push') || q.includes('alert') || q.includes('reminder')) {
     return 'Snowflex sends real-time mobile push alerts 5 minutes before shift start/end, plus instant updates for leave approvals and team meetings! 🔔'
   }
-  if (q.includes('chat') || q.includes('meet') || q.includes('video') || q.includes('call') || q.includes('screen')) {
-    return 'Teams can message live, start 1-to-1 video calls, or launch multi-user meetings with screen sharing right inside Snowflex Chat! 🎥'
+  if ((q.includes('chat') || q.includes('messag') || q.includes('dm')) && (q.includes('video') || q.includes('call') || q.includes('meet'))) {
+    return hinglish
+      ? 'Snowflex me Live Team Chat, 1-on-1 HD Video Calls, aur Group Meetings (screen sharing, raise hand & meeting links ke saath) sab built-in hain! 💬📹'
+      : 'Snowflex includes Live Team Chat, 1-on-1 HD Video Calls, and Group Meetings with screen sharing, raise hand, and instant join links — all built-in! 💬📹'
+  }
+  if (q.includes('meeting') || q.includes('meet') || q.includes('screen shar') || q.includes('screenshar') || q.includes('raise hand')) {
+    return hinglish
+      ? 'Snowflex Meetings me aap instant ya scheduled meeting start kar sakte hain, chat me direct join link bhej sakte hain, screen share kar sakte hain, aur host End-for-All kar sakta hai! 🎥🖥️'
+      : 'With Snowflex Meetings you can launch instant or scheduled rooms, share clickable meeting cards in chat, present your screen, raise hand, and host-manage participants! 🎥🖥️'
+  }
+  if (q.includes('video') || q.includes('call') || q.includes('ring') || q.includes('audio call')) {
+    return hinglish
+      ? 'Snowflex me aap kisi bhi teammate ko direct 1-on-1 HD Video Call kar sakte hain — live ring notification, camera/mic toggle aur missed call alerts ke saath! 📞📹'
+      : 'Snowflex supports direct 1-on-1 HD Video Calls right from chat — complete with live incoming call rings, mic/camera toggles, and missed call logs! 📞📹'
+  }
+  if (q.includes('chat') || q.includes('messag') || q.includes('dm') || q.includes('conversation')) {
+    return hinglish
+      ? 'Snowflex Live Chat me real-time 1-on-1 aur group messaging, online status, unread counts, aur chat ke andar se hi call/meeting start karne ka option milta hai! 💬✨'
+      : 'Snowflex Live Chat gives you real-time 1-on-1 and team messaging with online status, unread badges, and one-click video calls or meeting invites right inside chat! 💬✨'
   }
   if (q.includes('price') || q.includes('pricing') || q.includes('cost') || q.includes('free') || q.includes('signup')) {
     return 'You can create a free workspace right now to test all features with your team! Click "Start your free trial" whenever you\'re ready. 🚀'
